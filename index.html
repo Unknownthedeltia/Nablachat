@@ -19,14 +19,14 @@
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
         import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
         import { 
-            getFirestore, collection, doc, addDoc, getDoc, getDocs, setDoc,
+            getFirestore, collection, doc, addDoc, getDoc, getDocs, setDoc, deleteDoc, writeBatch,
             onSnapshot, updateDoc, serverTimestamp, query, runTransaction 
         } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
         // Global Variable Setup
         window.firebaseModules = {
             initializeApp, getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken,
-            getFirestore, collection, doc, addDoc, getDoc, getDocs, setDoc,
+            getFirestore, collection, doc, addDoc, getDoc, getDocs, setDoc, deleteDoc, writeBatch,
             onSnapshot, updateDoc, serverTimestamp, query, runTransaction
         };
     </script>
@@ -62,6 +62,32 @@
         .card {
             background-color: var(--card-bg);
             transition: background-color 0.3s;
+        }
+
+        /* CRITICAL FIX: Ensure hidden elements are actually hidden */
+        .hidden {
+            display: none !important;
+            visibility: hidden !important;
+            pointer-events: none !important;
+        }
+
+        /* Modal Overlay specific style */
+        .modal-overlay {
+            display: none; /* Default hidden */
+            position: fixed;
+            inset: 0;
+            background-color: rgba(0, 0, 0, 0.5);
+            z-index: 100; /* High z-index */
+            align-items: center;
+            justify-content: center;
+            backdrop-filter: blur(4px);
+        }
+        
+        /* When active, override display none */
+        .modal-overlay.active {
+            display: flex !important;
+            visibility: visible !important;
+            pointer-events: auto !important;
         }
 
         /* Message Formatting */
@@ -102,24 +128,34 @@
         /* Tooltip / Popover for colors */
         .color-palette {
             display: flex;
-            gap: 4px;
-            padding: 4px;
+            gap: 6px;
+            padding: 8px;
             background: var(--card-bg);
             border: 1px solid #ccc;
-            border-radius: 6px;
+            border-radius: 8px;
             position: absolute;
             bottom: 100%;
             left: 0;
-            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-            z-index: 20;
-            margin-bottom: 8px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+            z-index: 50;
+            margin-bottom: 10px;
+            flex-wrap: wrap;
+            width: 140px;
         }
         .color-swatch {
-            width: 20px;
-            height: 20px;
+            width: 24px;
+            height: 24px;
             border-radius: 50%;
             cursor: pointer;
-            border: 1px solid rgba(0,0,0,0.1);
+            border: 2px solid rgba(0,0,0,0.1);
+            transition: transform 0.1s;
+            padding: 0;
+            appearance: none;
+        }
+        .color-swatch:hover {
+            transform: scale(1.2);
+            border-color: rgba(0,0,0,0.3);
+            z-index: 10;
         }
 
         /* Mikan Effect */
@@ -131,10 +167,20 @@
             pointer-events: none;
         }
         
-        /* Delete Button Hover */
-        .btn-delete:hover {
-            color: #ef4444;
-            transform: scale(1.1);
+        /* Action Button Hover */
+        .btn-action:hover {
+            transform: scale(1.15);
+        }
+        
+        /* Pinned Style */
+        .pinned-thread {
+            border-left: 4px solid var(--accent) !important;
+            background-color: rgba(59, 130, 246, 0.03);
+        }
+        
+        /* Admin View Z-Index Fix */
+        #view-admin {
+            z-index: 60; 
         }
     </style>
 </head>
@@ -176,6 +222,16 @@
                     <!-- Search Result Count -->
                     <div id="search-result-count" class="text-sm text-gray-500 text-right h-5 opacity-0 transition-opacity">
                         検索結果: <span id="count-number" class="font-bold">0</span> 件
+                    </div>
+
+                    <!-- Tab Switcher -->
+                    <div class="flex gap-2 border-b border-gray-300 dark:border-gray-700">
+                        <button onclick="app.logic.switchTab('saved')" id="tab-saved" class="px-4 py-2 border-b-2 border-blue-500 font-bold text-blue-500 transition">
+                            <i class="fa-solid fa-star mr-1"></i>保存したスレッド
+                        </button>
+                        <button onclick="app.logic.switchTab('all')" id="tab-all" class="px-4 py-2 border-b-2 border-transparent text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 transition">
+                            <i class="fa-solid fa-globe mr-1"></i>すべてのスレッド
+                        </button>
                     </div>
                 </div>
 
@@ -224,16 +280,18 @@
                         
                         <!-- Color Picker Toggle -->
                         <div class="relative">
-                            <button type="button" onclick="app.ui.toggleColorPalette()" class="p-2 rounded hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-600 dark:text-gray-300 transition" title="文字色">
+                            <button type="button" onclick="app.ui.toggleColorPalette(event)" class="p-2 rounded hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-600 dark:text-gray-300 transition" title="文字色">
                                 <i class="fa-solid fa-palette"></i>
                             </button>
                             <div id="color-palette" class="color-palette hidden">
-                                <div class="color-swatch bg-red-500" onclick="app.ui.insertColor('#ef4444')"></div>
-                                <div class="color-swatch bg-blue-500" onclick="app.ui.insertColor('#3b82f6')"></div>
-                                <div class="color-swatch bg-green-500" onclick="app.ui.insertColor('#22c55e')"></div>
-                                <div class="color-swatch bg-yellow-500" onclick="app.ui.insertColor('#eab308')"></div>
-                                <div class="color-swatch bg-purple-500" onclick="app.ui.insertColor('#a855f7')"></div>
-                                <div class="color-swatch bg-gray-500" onclick="app.ui.insertColor('#6b7280')"></div>
+                                <button type="button" class="color-swatch" style="background-color: #ef4444;" onclick="app.ui.insertColor('#ef4444')"></button>
+                                <button type="button" class="color-swatch" style="background-color: #3b82f6;" onclick="app.ui.insertColor('#3b82f6')"></button>
+                                <button type="button" class="color-swatch" style="background-color: #22c55e;" onclick="app.ui.insertColor('#22c55e')"></button>
+                                <button type="button" class="color-swatch" style="background-color: #eab308;" onclick="app.ui.insertColor('#eab308')"></button>
+                                <button type="button" class="color-swatch" style="background-color: #a855f7;" onclick="app.ui.insertColor('#a855f7')"></button>
+                                <button type="button" class="color-swatch" style="background-color: #6b7280;" onclick="app.ui.insertColor('#6b7280')"></button>
+                                <button type="button" class="color-swatch" style="background-color: #ec4899;" onclick="app.ui.insertColor('#ec4899')"></button>
+                                <button type="button" class="color-swatch" style="background-color: #6366f1;" onclick="app.ui.insertColor('#6366f1')"></button>
                             </div>
                         </div>
 
@@ -257,12 +315,42 @@
             </div>
         </div>
 
+        <!-- VIEW: Admin Panel -->
+        <div id="view-admin" class="view absolute inset-0 flex flex-col hidden bg-gray-100 dark:bg-gray-900">
+            <div class="bg-red-600 text-white p-4 shadow-md flex justify-between items-center shrink-0">
+                <div class="flex items-center gap-2">
+                    <i class="fa-solid fa-shield-halved text-xl"></i>
+                    <h1 class="font-bold text-lg">管理者ダッシュボード</h1>
+                </div>
+                <div class="flex gap-2">
+                    <button onclick="app.logic.logoutAdmin()" class="bg-red-800 text-white px-3 py-1 rounded text-sm font-bold hover:bg-red-900 border border-red-700">
+                        ログアウト
+                    </button>
+                    <button onclick="app.router.navigate('')" class="bg-white text-red-600 px-3 py-1 rounded text-sm font-bold hover:bg-gray-100">
+                        閉じる
+                    </button>
+                </div>
+            </div>
+            
+            <div class="flex-1 overflow-y-auto p-4 max-w-5xl mx-auto w-full">
+                <h2 class="text-xl font-bold mb-4 flex items-center gap-2">
+                    <i class="fa-solid fa-triangle-exclamation text-yellow-500"></i> 通報一覧
+                    <button onclick="app.logic.refreshAdmin()" class="text-sm font-normal bg-gray-200 dark:bg-gray-700 px-2 py-1 rounded ml-2 text-gray-600 dark:text-gray-300 hover:bg-gray-300"><i class="fa-solid fa-sync"></i> 更新</button>
+                </h2>
+                
+                <div id="admin-report-list" class="space-y-4">
+                    <div class="loader mx-auto mt-10"></div>
+                </div>
+            </div>
+        </div>
+
     </main>
 
-    <!-- Modals -->
+    <!-- Modals (All use modal-overlay class) -->
+    
     <!-- Create Thread Modal -->
-    <div id="modal-create" class="fixed inset-0 bg-black bg-opacity-50 z-50 hidden flex items-center justify-center p-4 backdrop-blur-sm">
-        <div class="card p-6 rounded-xl shadow-2xl w-full max-w-md transform scale-95 opacity-0 transition-all duration-300" id="modal-create-content">
+    <div id="modal-create" class="modal-overlay">
+        <div class="card p-6 rounded-xl shadow-2xl w-full max-w-md transform transition-all duration-300" id="modal-create-content">
             <h3 class="text-xl font-bold mb-4">新しいスレッドを作成</h3>
             <div class="space-y-4">
                 <div>
@@ -281,9 +369,40 @@
         </div>
     </div>
 
+    <!-- Report Modal -->
+    <div id="modal-report" class="modal-overlay">
+        <div class="card p-6 rounded-xl shadow-2xl w-full max-w-sm transform transition-all duration-300" id="modal-report-content">
+            <h3 class="text-xl font-bold mb-4 text-red-600 flex items-center"><i class="fa-solid fa-triangle-exclamation mr-2"></i>通報</h3>
+            <p class="text-sm text-gray-600 dark:text-gray-300 mb-4">このメッセージを通報する理由を選択してください。</p>
+            <form id="report-form" class="space-y-3">
+                <input type="hidden" id="report-msg-id">
+                <label class="flex items-center space-x-2 cursor-pointer p-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded">
+                    <input type="radio" name="report-reason" value="spam" class="accent-red-500" checked>
+                    <span>スパム / 宣伝</span>
+                </label>
+                <label class="flex items-center space-x-2 cursor-pointer p-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded">
+                    <input type="radio" name="report-reason" value="harassment" class="accent-red-500">
+                    <span>ハラスメント / 誹謗中傷</span>
+                </label>
+                <label class="flex items-center space-x-2 cursor-pointer p-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded">
+                    <input type="radio" name="report-reason" value="inappropriate" class="accent-red-500">
+                    <span>不適切なコンテンツ</span>
+                </label>
+                <label class="flex items-center space-x-2 cursor-pointer p-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded">
+                    <input type="radio" name="report-reason" value="other" class="accent-red-500">
+                    <span>その他</span>
+                </label>
+            </form>
+            <div class="flex justify-end gap-3 mt-6">
+                <button onclick="app.ui.closeModals()" class="px-4 py-2 rounded hover:bg-gray-200 dark:hover:bg-gray-700 transition">キャンセル</button>
+                <button onclick="app.logic.submitReport()" class="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded shadow transition">通報する</button>
+            </div>
+        </div>
+    </div>
+
     <!-- Settings Modal -->
-    <div id="modal-settings" class="fixed inset-0 bg-black bg-opacity-50 z-50 hidden flex items-end md:items-center justify-center md:p-4 backdrop-blur-sm">
-        <div class="card p-6 rounded-t-xl md:rounded-xl shadow-2xl w-full max-w-md transform translate-y-10 opacity-0 transition-all duration-300" id="modal-settings-content">
+    <div id="modal-settings" class="modal-overlay">
+        <div class="card p-6 rounded-t-xl md:rounded-xl shadow-2xl w-full max-w-md transform transition-all duration-300" id="modal-settings-content">
             <div class="flex justify-between items-center mb-4">
                 <h3 class="text-xl font-bold">設定</h3>
                 <button onclick="app.ui.closeModals()" class="text-gray-500"><i class="fa-solid fa-times"></i></button>
@@ -300,6 +419,39 @@
                     <label class="block mb-2">文字サイズ</label>
                     <input type="range" min="12" max="24" value="16" id="font-size-slider" class="w-full accent-blue-500" oninput="app.ui.changeFontSize(this.value)">
                 </div>
+                
+                <div class="pt-4 border-t border-gray-200 dark:border-gray-700">
+                    <button onclick="app.logic.openAdminLoginModal()" class="w-full text-left text-gray-500 hover:text-red-500 text-sm transition">
+                        <i class="fa-solid fa-shield-halved mr-2"></i>管理者メニュー
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Admin Login Modal -->
+    <div id="modal-admin-login" class="modal-overlay">
+        <div class="card p-6 rounded-xl shadow-2xl w-full max-w-sm transform transition-all duration-300" id="modal-admin-login-content">
+            <h3 class="text-xl font-bold mb-4">管理者ログイン</h3>
+            <p class="text-sm text-gray-600 dark:text-gray-300 mb-4">管理者用パスワードを入力してください。</p>
+            <input type="password" id="admin-password-input" class="w-full card border border-gray-300 dark:border-gray-600 rounded p-2 mb-4 focus:outline-none focus:border-blue-500" placeholder="Password">
+            <div class="flex justify-end gap-3">
+                <button onclick="app.ui.closeModals()" class="px-4 py-2 rounded hover:bg-gray-200 dark:hover:bg-gray-700 transition">キャンセル</button>
+                <button onclick="app.logic.submitAdminLogin()" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded shadow transition">ログイン</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Confirmation Modal -->
+    <div id="modal-confirm" class="modal-overlay">
+        <div class="card p-6 rounded-xl shadow-2xl w-full max-w-sm transform transition-all duration-300" id="modal-confirm-content">
+            <h3 class="text-lg font-bold mb-4 flex items-center gap-2">
+                <i class="fa-solid fa-circle-question text-blue-500"></i> 確認
+            </h3>
+            <p id="confirm-message" class="text-gray-700 dark:text-gray-300 mb-6">よろしいですか？</p>
+            <div class="flex justify-end gap-3">
+                <button onclick="app.ui.closeModals()" class="px-4 py-2 rounded hover:bg-gray-200 dark:hover:bg-gray-700 transition">キャンセル</button>
+                <button id="confirm-ok-btn" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded shadow transition">OK</button>
             </div>
         </div>
     </div>
@@ -313,7 +465,13 @@
                 isDarkMode: false,
                 unsubscribeRoom: null, // Listener cleanup
                 threads: [], // Store fetched threads locally for search
-                filterText: ''
+                filterText: '',
+                savedThreads: new Set(), // Set of saved (joined) thread IDs
+                pinnedThreads: new Set(), // Set of pinned thread IDs
+                currentTab: 'saved', // 'saved' (default) or 'all'
+                unsubscribeThreadInfo: null, // Listener for thread meta info
+                isAdmin: false, // Admin state
+                secretRooms: ['test0123456789', 'mikan-room'] // Define secret rooms
             },
             
             // Firebase References (Populated after module load)
@@ -351,6 +509,8 @@
                 app.fb.doc = modules.doc;
                 app.fb.addDoc = modules.addDoc;
                 app.fb.setDoc = modules.setDoc;
+                app.fb.deleteDoc = modules.deleteDoc;
+                app.fb.writeBatch = modules.writeBatch;
                 app.fb.getDoc = modules.getDoc;
                 app.fb.getDocs = modules.getDocs;
                 app.fb.onSnapshot = modules.onSnapshot;
@@ -392,6 +552,20 @@
                 },
                 handleRoute() {
                     const hash = window.location.hash.slice(1); // Remove #
+                    
+                    // Route change triggers modal close to prevent zombie modals
+                    app.ui.closeModals();
+
+                    if (hash === 'admin') {
+                        app.state.currentRoomId = null;
+                        if (!app.state.isAdmin) {
+                            app.logic.openAdminLoginModal();
+                        } else {
+                            app.ui.showView('view-admin');
+                            app.logic.refreshAdmin();
+                        }
+                        return;
+                    }
                     if (hash.startsWith('room/')) {
                         const roomId = hash.split('/')[1];
                         if (roomId) app.logic.enterRoom(roomId);
@@ -403,33 +577,67 @@
 
             ui: {
                 showView(viewId) {
-                    document.querySelectorAll('.view').forEach(el => el.classList.add('hidden'));
+                    // Force hide all views properly
+                    document.querySelectorAll('.view').forEach(el => {
+                        el.classList.add('hidden');
+                        el.style.display = 'none'; // Force style
+                    });
                     const target = document.getElementById(viewId);
                     target.classList.remove('hidden');
-                    gsap.fromTo(target, { opacity: 0, y: 10 }, { opacity: 1, y: 0, duration: 0.3, ease: "power2.out" });
+                    target.style.display = 'flex'; // Force style
                 },
 
                 showCreateModal() {
+                    app.ui.closeModals(); 
                     const modal = document.getElementById('modal-create');
-                    const content = document.getElementById('modal-create-content');
-                    modal.classList.remove('hidden');
-                    gsap.to(content, { opacity: 1, scale: 1, duration: 0.3, ease: "back.out(1.7)" });
+                    modal.classList.add('active'); // Use new class-based toggle
+                },
+
+                showReportModal(msgId) {
+                    app.ui.closeModals();
+                    document.getElementById('report-msg-id').value = msgId;
+                    document.getElementById('report-form').reset();
+                    const modal = document.getElementById('modal-report');
+                    modal.classList.add('active');
+                },
+
+                showConfirm(message, onConfirm) {
+                    app.ui.closeModals();
+                    const modal = document.getElementById('modal-confirm');
+                    const msgEl = document.getElementById('confirm-message');
+                    const okBtn = document.getElementById('confirm-ok-btn');
+                    
+                    msgEl.innerHTML = message;
+                    
+                    // Clone to remove old listeners
+                    const newOkBtn = okBtn.cloneNode(true);
+                    okBtn.parentNode.replaceChild(newOkBtn, okBtn);
+                    
+                    newOkBtn.onclick = () => {
+                        onConfirm();
+                        app.ui.closeModals();
+                    };
+                    
+                    modal.classList.add('active');
                 },
 
                 toggleSettings() {
                     const modal = document.getElementById('modal-settings');
-                    const content = document.getElementById('modal-settings-content');
-                    if (modal.classList.contains('hidden')) {
-                        modal.classList.remove('hidden');
-                        gsap.to(content, { opacity: 1, y: 0, duration: 0.3, ease: "power2.out" });
+                    if (modal.classList.contains('active')) {
+                        app.ui.closeModals();
                     } else {
                         app.ui.closeModals();
+                        modal.classList.add('active');
                     }
                 },
 
+                // FIXED: Robust modal closing targeting IDs
                 closeModals() {
-                    const modals = document.querySelectorAll('[id^="modal-"]');
-                    modals.forEach(m => m.classList.add('hidden'));
+                    const modalIds = ['modal-create', 'modal-report', 'modal-settings', 'modal-admin-login', 'modal-confirm'];
+                    modalIds.forEach(id => {
+                        const m = document.getElementById(id);
+                        if (m) m.classList.remove('active');
+                    });
                 },
 
                 toggleTheme() {
@@ -463,13 +671,16 @@
                     const el = document.getElementById(`msg-${num}`);
                     if (el) {
                         el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                        gsap.fromTo(el, { backgroundColor: "rgba(59, 130, 246, 0.2)" }, { backgroundColor: "transparent", duration: 2, ease: "power2.out" });
+                        // Simple highlight without GSAP
+                        el.style.backgroundColor = "rgba(59, 130, 246, 0.2)";
+                        setTimeout(() => el.style.backgroundColor = "transparent", 2000);
                     }
                 },
 
                 // Toolbar Helpers
                 insertTag(startTag, endTag) {
                     const textarea = document.getElementById('input-content');
+                    textarea.focus(); 
                     const start = textarea.selectionStart;
                     const end = textarea.selectionEnd;
                     const text = textarea.value;
@@ -478,12 +689,12 @@
                     const after = text.substring(end, text.length);
 
                     textarea.value = before + startTag + selection + endTag + after;
-                    textarea.focus();
                     textarea.selectionStart = start + startTag.length;
                     textarea.selectionEnd = end + startTag.length;
                 },
 
-                toggleColorPalette() {
+                toggleColorPalette(e) {
+                    if(e) e.preventDefault(); 
                     const palette = document.getElementById('color-palette');
                     palette.classList.toggle('hidden');
                 },
@@ -500,15 +711,19 @@
                         mikan.className = 'mikan';
                         mikan.textContent = '🍊';
                         mikan.style.left = Math.random() * 100 + 'vw';
+                        // Use simple CSS animation instead of GSAP if needed, or keeping GSAP here is fine as it's isolated
+                        // For safety, removing GSAP dependency here too
+                        mikan.style.transition = `top ${2 + Math.random() * 3}s ease-in, transform 3s`;
+                        mikan.style.top = '-50px';
                         container.appendChild(mikan);
                         
-                        gsap.to(mikan, {
-                            y: window.innerHeight + 100,
-                            rotation: Math.random() * 360,
-                            duration: 2 + Math.random() * 3,
-                            ease: "power1.in",
-                            onComplete: () => mikan.remove()
-                        });
+                        // Force reflow
+                        void mikan.offsetWidth;
+                        
+                        mikan.style.top = (window.innerHeight + 100) + 'px';
+                        mikan.style.transform = `rotate(${Math.random() * 360}deg)`;
+                        
+                        setTimeout(() => mikan.remove(), 5000);
                     }
                 }
             },
@@ -523,16 +738,80 @@
                         document.getElementById('font-size-slider').value = savedSize;
                         app.ui.changeFontSize(savedSize);
                     }
+
+                    const savedThreads = localStorage.getItem('nablachat_saved_threads');
+                    if (savedThreads) {
+                        try {
+                            app.state.savedThreads = new Set(JSON.parse(savedThreads));
+                        } catch (e) { console.error(e); }
+                    }
+                    
+                    const savedPinned = localStorage.getItem('nablachat_pinned_threads');
+                    if (savedPinned) {
+                        try {
+                            app.state.pinnedThreads = new Set(JSON.parse(savedPinned));
+                        } catch (e) { console.error(e); }
+                    }
+
+                    // Check for admin persistence
+                    const adminFlag = localStorage.getItem('nablachat_is_admin');
+                    if (adminFlag === 'true') {
+                        app.state.isAdmin = true;
+                    }
+                },
+
+                switchTab(tab) {
+                    app.state.currentTab = tab;
+                    const savedTab = document.getElementById('tab-saved');
+                    const allTab = document.getElementById('tab-all');
+                    
+                    if (tab === 'saved') {
+                        savedTab.className = "px-4 py-2 border-b-2 border-blue-500 font-bold text-blue-500 transition";
+                        allTab.className = "px-4 py-2 border-b-2 border-transparent text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 transition";
+                    } else {
+                        savedTab.className = "px-4 py-2 border-b-2 border-transparent text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 transition";
+                        allTab.className = "px-4 py-2 border-b-2 border-blue-500 font-bold text-blue-500 transition";
+                    }
+                    app.logic.renderThreadList();
+                },
+
+                toggleLocalSave(threadId) {
+                    const saved = app.state.savedThreads;
+                    if (saved.has(threadId)) {
+                        saved.delete(threadId);
+                        if (app.state.pinnedThreads.has(threadId)) {
+                            app.logic.togglePin(threadId);
+                        }
+                    } else {
+                        saved.add(threadId);
+                    }
+                    localStorage.setItem('nablachat_saved_threads', JSON.stringify([...saved]));
+                    app.logic.renderThreadList();
+                },
+                
+                togglePin(threadId) {
+                    const pinned = app.state.pinnedThreads;
+                    if (pinned.has(threadId)) {
+                        pinned.delete(threadId);
+                    } else {
+                        pinned.add(threadId);
+                        if (!app.state.savedThreads.has(threadId)) {
+                            app.state.savedThreads.add(threadId);
+                            localStorage.setItem('nablachat_saved_threads', JSON.stringify([...app.state.savedThreads]));
+                        }
+                    }
+                    localStorage.setItem('nablachat_pinned_threads', JSON.stringify([...pinned]));
+                    app.logic.renderThreadList();
                 },
 
                 async showHome() {
                     if (app.state.unsubscribeRoom) app.state.unsubscribeRoom();
+                    if (app.state.unsubscribeThreadInfo) app.state.unsubscribeThreadInfo(); // Clean up info listener
                     app.state.currentRoomId = null;
                     app.ui.showView('view-home');
                     
                     const listEl = document.getElementById('thread-list');
                     
-                    // Clear search
                     document.getElementById('thread-search').value = '';
                     app.state.filterText = '';
                     document.getElementById('search-result-count').classList.add('opacity-0');
@@ -541,28 +820,22 @@
                         const threadsRef = app.fb.collection(app.fb.db, 'artifacts', app.fb.appId, 'public', 'data', 'threads');
                         const snapshot = await app.fb.getDocs(threadsRef);
                         
-                        app.state.threads = []; // Clear current state
+                        app.state.threads = []; 
                         const twoMonthsAgo = new Date();
                         twoMonthsAgo.setMonth(twoMonthsAgo.getMonth() - 2);
 
                         snapshot.forEach(doc => {
                             const data = doc.data();
                             const lastUpdated = data.lastUpdated?.toDate() || new Date();
-                            // Filter out old threads AND archived threads
                             if (lastUpdated > twoMonthsAgo && !data.archived) {
                                 app.state.threads.push({ id: doc.id, ...data, lastUpdated });
                             }
                         });
 
-                        // Sort newest first
-                        app.state.threads.sort((a, b) => b.lastUpdated - a.lastUpdated);
-
-                        // Initial Render
                         app.logic.renderThreadList();
 
                     } catch (e) {
                         console.error("Error fetching threads", e);
-                        // Show permission error specifically
                         let errorMsg = '読み込みエラーが発生しました。';
                         let additionalInfo = '';
                         
@@ -595,20 +868,18 @@ service cloud.firestore {
                     app.state.filterText = input.value;
                     const lowerText = app.state.filterText.toLowerCase();
 
-                    // --- Hidden Commands ---
                     const secretHash = "ff4ace7ee32d4b2e7c5ceb325911d9e0ec8b241b8190002747b4932545c427625368906cc1208a68233387c093a7e2e1a26ba220ab259a7d16c7da297bdcfc30";
                     if (app.state.filterText === secretHash) {
                         input.value = "";
-                        app.router.navigate('room/test0123456789'); // Go to Test Room
+                        app.router.navigate('room/test0123456789'); 
                         return;
                     }
                     if (lowerText === "mikanchan") {
                         input.value = "";
                         app.ui.triggerMikanEffect();
-                        setTimeout(() => app.router.navigate('room/mikan-room'), 1500); // Go to Hidden Mikan Room
+                        setTimeout(() => app.router.navigate('room/mikan-room'), 1500); 
                         return;
                     }
-                    // -----------------------
 
                     app.logic.renderThreadList();
                 },
@@ -621,12 +892,28 @@ service cloud.firestore {
                     listEl.innerHTML = '';
                     
                     const searchText = app.state.filterText.toLowerCase();
+                    const isSavedTab = app.state.currentTab === 'saved';
 
-                    const filtered = app.state.threads.filter(t => {
+                    let filtered = app.state.threads.filter(t => {
                         return (t.title || '').toLowerCase().includes(searchText) || t.id.toLowerCase().includes(searchText);
                     });
 
-                    // Update count display
+                    filtered = filtered.filter(t => {
+                        // Secret rooms check
+                        if (app.state.secretRooms.includes(t.id) && !app.state.isAdmin) return false;
+
+                        const isSaved = app.state.savedThreads.has(t.id);
+                        return isSavedTab ? isSaved : true;
+                    });
+
+                    filtered.sort((a, b) => {
+                        const isPinnedA = app.state.pinnedThreads.has(a.id);
+                        const isPinnedB = app.state.pinnedThreads.has(b.id);
+                        if (isPinnedA && !isPinnedB) return -1;
+                        if (!isPinnedA && isPinnedB) return 1;
+                        return b.lastUpdated - a.lastUpdated;
+                    });
+
                     if (searchText) {
                         countEl.classList.remove('opacity-0');
                         countNumEl.innerText = filtered.length;
@@ -635,25 +922,36 @@ service cloud.firestore {
                     }
 
                     if (filtered.length === 0) {
-                        listEl.innerHTML = '<div class="col-span-full text-center text-gray-400 py-10">条件に一致するスレッドがありません。</div>';
+                        const msg = isSavedTab 
+                            ? '保存されたスレッドはありません。<br>「すべてのスレッド」タブから探して参加してみましょう。' 
+                            : 'スレッドが見つかりません。';
+                        listEl.innerHTML = `<div class="col-span-full text-center text-gray-400 py-10">${msg}</div>`;
                         return;
                     }
 
                     filtered.forEach(t => {
                         const dateStr = t.lastUpdated.toLocaleDateString('ja-JP', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
                         const isOfficial = t.isOfficial === true;
-                        // Check if current user is the creator
                         const isCreator = app.state.user && t.creator === app.state.user.uid;
+                        const isAdmin = app.state.isAdmin;
                         
+                        const isPinned = app.state.pinnedThreads.has(t.id);
+                        const isSaved = app.state.savedThreads.has(t.id);
+                        
+                        // Check if secret room
+                        const isSecret = app.state.secretRooms.includes(t.id);
+
                         const div = document.createElement('div');
-                        // Add border color for official threads
-                        const borderClass = isOfficial ? 'border-red-400 dark:border-red-500 border-2' : 'border-transparent hover:border-blue-300 border';
+                        let divClasses = `card p-4 rounded-lg shadow hover:shadow-lg transition cursor-pointer relative overflow-hidden group`;
+                        if (isOfficial) divClasses += ' border-red-400 dark:border-red-500 border-2';
+                        else divClasses += ' border-transparent hover:border-blue-300 border';
                         
-                        div.className = `card p-4 rounded-lg shadow hover:shadow-lg transition cursor-pointer relative overflow-hidden group ${borderClass}`;
+                        if (isPinned) divClasses += ' pinned-thread';
                         
-                        // Prevent delete button click from triggering navigation
+                        div.className = divClasses;
+                        
                         div.onclick = (e) => {
-                            if (!e.target.closest('.btn-delete')) {
+                            if (!e.target.closest('.btn-action')) {
                                 app.router.navigate(`room/${t.id}`);
                             }
                         };
@@ -662,16 +960,40 @@ service cloud.firestore {
                             ? `<span class="bg-red-500 text-white text-[10px] px-2 py-0.5 rounded-full font-bold ml-2">公式/Test</span>` 
                             : '';
 
-                        const deleteBtnHtml = isCreator 
-                            ? `<button onclick="app.logic.archiveThread('${t.id}')" class="btn-delete absolute top-3 right-3 text-gray-300 transition z-20" title="一覧から削除（アーカイブ）">
+                        let actionBtns = '';
+                        
+                        // Allow saving/pinning only if NOT secret OR user is Admin
+                        if (!isSecret || isAdmin) {
+                            if (isSaved) {
+                                const pinIcon = isPinned ? 'fa-thumbtack text-blue-500' : 'fa-thumbtack text-gray-300';
+                                actionBtns += `<button onclick="app.logic.togglePin('${t.id}')" class="btn-action absolute top-3 right-10 hover:text-blue-500 transition z-20 ${pinIcon}" title="ピン留め/解除">
+                                    <i class="fa-solid fa-thumbtack"></i>
+                                   </button>`;
+                            }
+
+                            if (isSaved) {
+                                actionBtns += `<button onclick="app.logic.toggleLocalSave('${t.id}')" class="btn-action absolute top-3 right-3 text-gray-400 hover:text-red-500 transition z-20" title="リストから削除（保存解除）">
+                                    <i class="fa-solid fa-trash"></i>
+                                   </button>`;
+                            } else {
+                                actionBtns += `<button onclick="app.logic.toggleLocalSave('${t.id}')" class="btn-action absolute top-3 right-3 text-gray-300 hover:text-blue-500 transition z-20" title="リストに保存">
+                                    <i class="fa-solid fa-plus-circle"></i>
+                                   </button>`;
+                            }
+                        }
+
+                        // NEW: True Delete Button for Creator OR Admin
+                        if ((isCreator || isAdmin) && !isSavedTab) {
+                            actionBtns += `<button onclick="app.logic.deleteThread('${t.id}')" class="btn-action absolute top-3 right-16 text-gray-300 hover:text-red-500 transition z-20" title="【作成者/管理者】スレッドを完全に削除">
                                 <i class="fa-solid fa-trash"></i>
-                               </button>` 
-                            : '';
+                               </button>`;
+                        }
 
                         div.innerHTML = `
-                            ${deleteBtnHtml}
-                            <div class="flex justify-between items-start mb-2 relative z-10 pr-6">
+                            ${actionBtns}
+                            <div class="flex justify-between items-start mb-2 relative z-10 pr-24">
                                 <h3 class="font-bold text-lg truncate pr-2 group-hover:text-blue-500 transition flex items-center">
+                                    ${isPinned ? '<i class="fa-solid fa-thumbtack text-blue-500 mr-1 text-sm"></i>' : ''}
                                     ${app.logic.escapeHtml(t.title || '無題のスレッド')}
                                     ${badgeHtml}
                                 </h3>
@@ -683,8 +1005,6 @@ service cloud.firestore {
                             </div>
                         `;
                         listEl.appendChild(div);
-                        // Simple stagger animation
-                        gsap.from(div, { opacity: 0, y: 10, duration: 0.3 });
                     });
                 },
 
@@ -694,11 +1014,8 @@ service cloud.firestore {
                     
                     const title = titleInput.value.trim() || "名無しのスレッド";
                     const password = passInput.value.trim();
-                    
-                    // Client-side password check (Simple)
                     const isAdmin = (password === 'nabladmin');
 
-                    // Generate Auto-ID via Firestore doc reference
                     const threadsColl = app.fb.collection(app.fb.db, 'artifacts', app.fb.appId, 'public', 'data', 'threads');
                     const threadRef = app.fb.doc(threadsColl);
                     const roomId = threadRef.id;
@@ -710,11 +1027,14 @@ service cloud.firestore {
                                 createdAt: app.fb.serverTimestamp(),
                                 lastUpdated: app.fb.serverTimestamp(),
                                 messageCount: 0,
-                                isOfficial: isAdmin, // Flag as official if password matched
-                                creator: app.state.user.uid, // Save creator ID
-                                archived: false // Visibility flag
+                                isOfficial: isAdmin,
+                                creator: app.state.user.uid,
+                                archived: false
                             });
                         });
+
+                        app.state.savedThreads.add(roomId);
+                        localStorage.setItem('nablachat_saved_threads', JSON.stringify([...app.state.savedThreads]));
 
                         app.ui.closeModals();
                         titleInput.value = "";
@@ -726,25 +1046,207 @@ service cloud.firestore {
                     }
                 },
                 
-                async archiveThread(roomId) {
-                    if (!confirm("本当にこのスレッドを一覧から削除しますか？\n（内容は残りますが、検索結果には表示されなくなります）")) return;
+                // NEW: Complete Deletion Logic
+                async deleteThread(roomId) {
+                    app.ui.showConfirm("本当にこのスレッドを完全に削除しますか？\n（すべてのメッセージとデータが消え、復元できません）", async () => {
+                        try {
+                            const threadRef = app.fb.doc(app.fb.db, 'artifacts', app.fb.appId, 'public', 'data', 'threads', roomId);
+                            const msgsColl = app.fb.collection(threadRef, 'messages');
+                            
+                            // 1. Delete all messages (Batch delete)
+                            const snapshot = await app.fb.getDocs(msgsColl);
+                            const batch = app.fb.writeBatch(app.fb.db);
+                            snapshot.forEach(doc => {
+                                batch.delete(doc.ref);
+                            });
+                            // Also delete the thread doc
+                            batch.delete(threadRef);
+                            
+                            await batch.commit();
+                            
+                            // Update local state
+                            app.state.threads = app.state.threads.filter(t => t.id !== roomId);
+                            app.logic.renderThreadList();
+                            alert("スレッドを削除しました。");
+                        } catch (e) {
+                            console.error(e);
+                            alert("削除に失敗しました: " + e.message);
+                        }
+                    });
+                },
+                
+                async deleteReportedThread(reportId, roomId) {
+                    app.ui.showConfirm("対象のスレッドを完全に削除しますか？\n（メッセージ全消去、通報データも消去）", async () => {
+                        try {
+                            const threadRef = app.fb.doc(app.fb.db, 'artifacts', app.fb.appId, 'public', 'data', 'threads', roomId);
+                            const msgsColl = app.fb.collection(threadRef, 'messages');
+                            
+                            // Batch delete messages
+                            const snapshot = await app.fb.getDocs(msgsColl);
+                            const batch = app.fb.writeBatch(app.fb.db);
+                            snapshot.forEach(doc => batch.delete(doc.ref));
+                            
+                            // Delete thread doc and report doc
+                            batch.delete(threadRef);
+                            batch.delete(app.fb.doc(app.fb.db, 'artifacts', app.fb.appId, 'public', 'data', 'reports', reportId));
+                            
+                            await batch.commit();
+                            alert("スレッドを削除しました。");
+                            app.logic.refreshAdmin();
+                        } catch (e) {
+                            console.error(e);
+                            alert("削除失敗: " + e.message);
+                        }
+                    });
+                },
+
+                async reportMessage(msgId) {
+                    app.ui.showReportModal(msgId);
+                },
+
+                async submitReport() {
+                    const msgId = document.getElementById('report-msg-id').value;
+                    const form = document.getElementById('report-form');
+                    const reason = form.querySelector('input[name="report-reason"]:checked').value;
                     
-                    const threadRef = app.fb.doc(app.fb.db, 'artifacts', app.fb.appId, 'public', 'data', 'threads', roomId);
+                    const roomId = app.state.currentRoomId;
+                    const reportsRef = app.fb.collection(app.fb.db, 'artifacts', app.fb.appId, 'public', 'data', 'reports');
+
                     try {
-                        await app.fb.updateDoc(threadRef, {
-                            archived: true
+                        await app.fb.addDoc(reportsRef, {
+                            roomId: roomId,
+                            messageId: msgId,
+                            reporter: app.state.user.uid,
+                            timestamp: app.fb.serverTimestamp(),
+                            reason: reason
                         });
-                        // Remove from local state and re-render
-                        app.state.threads = app.state.threads.filter(t => t.id !== roomId);
-                        app.logic.renderThreadList();
+                        app.ui.closeModals();
+                        alert("通報を受け付けました。ご協力ありがとうございます。");
                     } catch (e) {
                         console.error(e);
-                        alert("削除に失敗しました");
+                        alert("送信に失敗しました。");
                     }
                 },
 
+                // ADMIN FUNCTIONS
+                openAdminLoginModal() {
+                    app.ui.closeModals(); // Close settings modal
+                    document.getElementById('modal-admin-login').classList.add('active');
+                    document.getElementById('admin-password-input').value = ""; // clear
+                },
+
+                submitAdminLogin() {
+                    const input = document.getElementById('admin-password-input');
+                    const pass = input.value;
+                    if (pass === "nabladmin") {
+                        app.ui.closeModals();
+                        app.state.isAdmin = true;
+                        localStorage.setItem('nablachat_is_admin', 'true');
+                        app.router.navigate('admin');
+                    } else {
+                        alert("パスワードが違います");
+                    }
+                },
+                
+                logoutAdmin() {
+                    app.state.isAdmin = false;
+                    localStorage.removeItem('nablachat_is_admin');
+                    app.router.navigate('');
+                },
+
+                async refreshAdmin() {
+                    const listEl = document.getElementById('admin-report-list');
+                    listEl.innerHTML = '<div class="loader mx-auto"></div>';
+                    
+                    try {
+                        const reportsRef = app.fb.collection(app.fb.db, 'artifacts', app.fb.appId, 'public', 'data', 'reports');
+                        const snap = await app.fb.getDocs(reportsRef);
+                        
+                        if (snap.empty) {
+                            listEl.innerHTML = '<div class="text-center text-gray-500">通報はありません。</div>';
+                            return;
+                        }
+
+                        let html = '';
+                        snap.forEach(doc => {
+                            const data = doc.data();
+                            const date = data.timestamp ? new Date(data.timestamp.toMillis()).toLocaleString() : '不明';
+                            const reasonMap = {
+                                'spam': 'スパム/宣伝',
+                                'harassment': '誹謗中傷',
+                                'inappropriate': '不適切',
+                                'other': 'その他'
+                            };
+                            
+                            html += `
+                                <div class="card p-4 rounded shadow border border-gray-200 dark:border-gray-700">
+                                    <div class="flex justify-between items-start mb-2">
+                                        <span class="font-bold text-red-500">${reasonMap[data.reason] || data.reason}</span>
+                                        <span class="text-xs text-gray-400">${date}</span>
+                                    </div>
+                                    <div class="text-sm mb-2">
+                                        <div>RoomID: <span class="font-mono text-xs bg-gray-100 p-1">${data.roomId}</span></div>
+                                        <div>MsgID: <span class="font-mono text-xs bg-gray-100 p-1">${data.messageId}</span></div>
+                                        <div class="text-xs text-gray-400 mt-1">Reporter: ${data.reporter}</div>
+                                    </div>
+                                    <div class="flex gap-2 justify-end flex-wrap">
+                                        <button onclick="app.logic.dismissReport('${doc.id}')" class="bg-gray-200 hover:bg-gray-300 text-gray-700 px-3 py-1 rounded text-sm transition">
+                                            通報を却下
+                                        </button>
+                                        <button onclick="app.logic.deleteReportedMessage('${doc.id}', '${data.roomId}', '${data.messageId}')" class="bg-red-600 hover:bg-red-700 text-white px-3 py-1 rounded text-sm transition">
+                                            書き込み削除
+                                        </button>
+                                        <button onclick="app.logic.deleteReportedThread('${doc.id}', '${data.roomId}')" class="bg-red-800 hover:bg-red-900 text-white px-3 py-1 rounded text-sm transition border border-red-700">
+                                            スレッドごと削除
+                                        </button>
+                                    </div>
+                                </div>
+                            `;
+                        });
+                        listEl.innerHTML = html;
+
+                    } catch (e) {
+                        console.error(e);
+                        listEl.innerHTML = `<div class="text-red-500">エラー: ${e.message}</div>`;
+                    }
+                },
+
+                async dismissReport(reportId) {
+                    app.ui.showConfirm("この通報データを削除しますか？", async () => {
+                        try {
+                            await app.fb.deleteDoc(app.fb.doc(app.fb.db, 'artifacts', app.fb.appId, 'public', 'data', 'reports', reportId));
+                            app.logic.refreshAdmin();
+                        } catch (e) { alert("エラー: " + e.message); }
+                    });
+                },
+
+                async deleteReportedMessage(reportId, roomId, messageId) {
+                    app.ui.showConfirm("対象の書き込みを削除しますか？\n(削除後、通報データも消去されます)", async () => {
+                        try {
+                            const msgRef = app.fb.doc(app.fb.db, 'artifacts', app.fb.appId, 'public', 'data', 'threads', roomId, 'messages', messageId);
+                            await app.fb.deleteDoc(msgRef);
+                            await app.fb.deleteDoc(app.fb.doc(app.fb.db, 'artifacts', app.fb.appId, 'public', 'data', 'reports', reportId));
+                            alert("削除しました。");
+                            app.logic.refreshAdmin();
+                        } catch (e) {
+                            console.error(e);
+                            alert("削除失敗: " + e.message);
+                        }
+                    });
+                },
+
                 async enterRoom(roomId) {
+                    if (app.state.unsubscribeThreadInfo) app.state.unsubscribeThreadInfo(); // Clear old listener
                     app.state.currentRoomId = roomId;
+                    
+                    // Don't auto-save if it is a secret room unless admin
+                    if (!app.state.secretRooms.includes(roomId) || app.state.isAdmin) {
+                        if (!app.state.savedThreads.has(roomId)) {
+                            app.state.savedThreads.add(roomId);
+                            localStorage.setItem('nablachat_saved_threads', JSON.stringify([...app.state.savedThreads]));
+                        }
+                    }
+
                     app.ui.showView('view-chat');
                     
                     const titleEl = document.getElementById('room-title');
@@ -757,12 +1259,10 @@ service cloud.firestore {
                     idEl.innerText = `ID: ${roomId}`;
                     msgContainer.innerHTML = '<div class="loader mx-auto mt-10"></div>';
 
-                    // --- Auto-Create Special Rooms Logic ---
                     if (roomId === 'test0123456789' || roomId === 'mikan-room') {
                         const threadRef = app.fb.doc(app.fb.db, 'artifacts', app.fb.appId, 'public', 'data', 'threads', roomId);
                         const snap = await app.fb.getDoc(threadRef);
                         if (!snap.exists()) {
-                            // Auto create if not exists
                             const roomTitle = roomId === 'mikan-room' ? '🍊 みかんの隠し部屋 🍊' : '開発・テスト用';
                             await app.fb.setDoc(threadRef, {
                                 title: roomTitle,
@@ -774,33 +1274,32 @@ service cloud.firestore {
                             });
                         }
                     }
-                    // ----------------------------------------
 
                     const threadRef = app.fb.doc(app.fb.db, 'artifacts', app.fb.appId, 'public', 'data', 'threads', roomId);
-                    try {
-                        const threadSnap = await app.fb.getDoc(threadRef);
-                        if (!threadSnap.exists()) {
-                            alert("スレッドが見つかりません。");
+                    
+                    // NEW: Realtime listener for thread existence/meta
+                    app.state.unsubscribeThreadInfo = app.fb.onSnapshot(threadRef, (doc) => {
+                        if (!doc.exists()) {
+                            alert("スレッドが削除されました。ホームに戻ります。");
                             app.router.navigate('');
                             return;
                         }
-                        const data = threadSnap.data();
+                        const data = doc.data();
                         titleEl.innerText = data.title;
                         
-                        // Show badge if official
                         if (data.isOfficial) {
                             badgeEl.classList.remove('hidden');
                             badgeEl.innerText = "公式/Test";
                         } else {
                             badgeEl.classList.add('hidden');
                         }
-
-                    } catch (e) {
-                        console.error(e);
-                        if (e.code === 'permission-denied') {
-                             alert("アクセス権限がありません。Firebaseのルール設定を確認してください。");
+                    }, (error) => {
+                        console.error("Thread Info Error", error);
+                        if (error.code === 'permission-denied') {
+                             alert("アクセス権限がありません。");
+                             app.router.navigate('');
                         }
-                    }
+                    });
 
                     const msgsRef = app.fb.collection(app.fb.db, 'artifacts', app.fb.appId, 'public', 'data', 'threads', roomId, 'messages');
                     
@@ -909,26 +1408,13 @@ service cloud.firestore {
                                 lastUpdated: app.fb.serverTimestamp()
                             });
                         });
-                        gsap.fromTo("#message-form button[type=submit]", { scale: 0.8 }, { scale: 1, duration: 0.2, ease: "back.out" });
+                        // No GSAP here for reliability
+                        const btn = document.querySelector("#message-form button[type=submit]");
+                        btn.classList.add("scale-90");
+                        setTimeout(() => btn.classList.remove("scale-90"), 150);
                     } catch (e) {
                         alert("送信に失敗しました");
                     }
-                },
-
-                async reportMessage(msgId) {
-                    if (!confirm("このメッセージを通報しますか？")) return;
-                    const roomId = app.state.currentRoomId;
-                    const reportsRef = app.fb.collection(app.fb.db, 'artifacts', app.fb.appId, 'public', 'data', 'reports');
-                    try {
-                        await app.fb.addDoc(reportsRef, {
-                            roomId: roomId,
-                            messageId: msgId,
-                            reporter: app.state.user.uid,
-                            timestamp: app.fb.serverTimestamp(),
-                            reason: "user_reported"
-                        });
-                        alert("通報しました。");
-                    } catch (e) {}
                 }
             }
         };
