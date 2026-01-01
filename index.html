@@ -287,11 +287,26 @@
                 if (!modules) return setTimeout(app.init, 100);
 
                 // Initialize Firebase
-                const firebaseConfig = JSON.parse(__firebase_config);
+                // ==========================================
+                // ★ ここにご自身のFirebase設定が入ります ★
+                // ==========================================
+                const firebaseConfig = {
+                    apiKey: "AIzaSyCTu4Vpy2zq-UndQv32qOjbmgEp78TaBOs",
+                    authDomain: "nbc2026-7eaab.firebaseapp.com",
+                    projectId: "nbc2026-7eaab",
+                    storageBucket: "nbc2026-7eaab.firebasestorage.app",
+                    messagingSenderId: "545102518164",
+                    appId: "1:545102518164:web:b2f3ce495fae9257ca2181",
+                    measurementId: "G-JCZJ0WK2B2"
+                };
+                
                 const fbApp = modules.initializeApp(firebaseConfig);
                 app.fb.auth = modules.getAuth(fbApp);
                 app.fb.db = modules.getFirestore(fbApp);
-                app.fb.appId = typeof __app_id !== 'undefined' ? __app_id : 'default-nablachat';
+                
+                // Firestoreルールと一致させるID
+                app.fb.appId = 'nablachat-app';
+                console.log(`[Nablachat] App ID set to: ${app.fb.appId}. Checking permissions...`);
                 
                 // Map Firestore functions
                 app.fb.collection = modules.collection;
@@ -306,11 +321,13 @@
                 app.fb.runTransaction = modules.runTransaction;
 
                 // Setup Auth
-                const initialToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
-                if (initialToken) {
-                    await modules.signInWithCustomToken(app.fb.auth, initialToken);
-                } else {
+                try {
+                    // GitHub Pagesでは custom token は不要なので匿名認証のみ
+                    // もし認証済みならスキップされる
                     await modules.signInAnonymously(app.fb.auth);
+                } catch (e) {
+                    console.error("Auth Error", e);
+                    alert("認証エラー: " + e.message);
                 }
 
                 modules.onAuthStateChanged(app.fb.auth, (user) => {
@@ -503,7 +520,31 @@
 
                     } catch (e) {
                         console.error("Error fetching threads", e);
-                        listEl.innerHTML = '<div class="text-red-500">読み込みエラーが発生しました。</div>';
+                        // Show permission error specifically
+                        let errorMsg = '読み込みエラーが発生しました。';
+                        let additionalInfo = '';
+                        
+                        if (e.code === 'permission-denied' || e.message.includes('permission')) {
+                            errorMsg = '【重要：アクセス権限エラー】<br>Firebaseコンソールのルール設定が正しくありません。';
+                            additionalInfo = `<div class="text-left bg-white p-2 rounded border mt-2 text-xs text-gray-700">
+                                <strong>Firebaseコンソール ＞ Firestore ＞ ルール</strong> に以下のコードを貼り付けてください：
+                                <pre class="bg-gray-100 p-2 mt-1 select-all overflow-x-auto">
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /artifacts/nablachat-app/public/data/{document=**} {
+      allow read, write: if true;
+    }
+  }
+}</pre>
+                            </div>
+                            <button onclick="app.router.handleRoute()" class="mt-4 bg-red-600 text-white px-4 py-2 rounded shadow hover:bg-red-700">ルール修正後に再読み込み</button>`;
+                        }
+                        
+                        listEl.innerHTML = `<div class="col-span-full text-center text-red-500 py-10 card p-6 border-red-200 border bg-red-50">
+                            <div class="font-bold text-lg mb-2">${errorMsg}</div>
+                            ${additionalInfo}
+                        </div>`;
                     }
                 },
 
@@ -560,6 +601,9 @@
                         titleEl.innerText = threadSnap.data().title;
                     } catch (e) {
                         console.error(e);
+                        if (e.code === 'permission-denied') {
+                             alert("アクセス権限がありません。Firebaseのルール設定を確認してください。");
+                        }
                     }
 
                     const msgsRef = app.fb.collection(app.fb.db, 'artifacts', app.fb.appId, 'public', 'data', 'threads', roomId, 'messages');
