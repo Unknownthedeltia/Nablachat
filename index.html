@@ -19,14 +19,14 @@
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
         import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
         import { 
-            getFirestore, collection, doc, addDoc, getDoc, getDocs, 
+            getFirestore, collection, doc, addDoc, getDoc, getDocs, setDoc,
             onSnapshot, updateDoc, serverTimestamp, query, runTransaction 
         } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
         // Global Variable Setup
         window.firebaseModules = {
             initializeApp, getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken,
-            getFirestore, collection, doc, addDoc, getDoc, getDocs,
+            getFirestore, collection, doc, addDoc, getDoc, getDocs, setDoc,
             onSnapshot, updateDoc, serverTimestamp, query, runTransaction
         };
     </script>
@@ -121,6 +121,21 @@
             cursor: pointer;
             border: 1px solid rgba(0,0,0,0.1);
         }
+
+        /* Mikan Effect */
+        .mikan {
+            position: fixed;
+            top: -50px;
+            font-size: 2rem;
+            z-index: 9999;
+            pointer-events: none;
+        }
+        
+        /* Delete Button Hover */
+        .btn-delete:hover {
+            color: #ef4444;
+            transform: scale(1.1);
+        }
     </style>
 </head>
 <body class="text-base h-screen flex flex-col overflow-hidden">
@@ -142,14 +157,29 @@
         <!-- VIEW: Home / Thread List -->
         <div id="view-home" class="view absolute inset-0 flex flex-col p-4 md:p-8 overflow-y-auto hidden">
             <div class="max-w-4xl mx-auto w-full">
-                <div class="flex justify-between items-center mb-6">
-                    <h2 class="text-2xl font-bold">スレッド一覧</h2>
-                    <button onclick="app.ui.showCreateModal()" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg shadow transition transform hover:scale-105">
-                        <i class="fa-solid fa-plus mr-2"></i>作成
-                    </button>
+                <!-- Search & Header -->
+                <div class="mb-6 space-y-4">
+                    <div class="flex justify-between items-center">
+                        <h2 class="text-2xl font-bold">スレッド一覧</h2>
+                        <button onclick="app.ui.showCreateModal()" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg shadow transition transform hover:scale-105">
+                            <i class="fa-solid fa-plus mr-2"></i>作成
+                        </button>
+                    </div>
+                    
+                    <!-- Search Bar -->
+                    <div class="relative">
+                        <i class="fa-solid fa-search absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400"></i>
+                        <input type="text" id="thread-search" placeholder="スレッドを検索... (ID検索も可)" oninput="app.logic.filterThreads()" 
+                               class="w-full card border border-gray-300 dark:border-gray-600 rounded-lg pl-10 pr-4 py-2 focus:outline-none focus:border-blue-500 transition shadow-sm">
+                    </div>
+                    
+                    <!-- Search Result Count -->
+                    <div id="search-result-count" class="text-sm text-gray-500 text-right h-5 opacity-0 transition-opacity">
+                        検索結果: <span id="count-number" class="font-bold">0</span> 件
+                    </div>
                 </div>
 
-                <div id="thread-list" class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div id="thread-list" class="grid grid-cols-1 md:grid-cols-2 gap-4 pb-20">
                     <!-- Threads will be injected here -->
                     <div class="loader mx-auto col-span-full mt-10"></div>
                 </div>
@@ -163,7 +193,10 @@
                 <div class="flex items-center gap-2">
                     <button onclick="app.router.navigate('')" class="mr-2 text-gray-500 hover:text-blue-500 w-8 h-8 flex items-center justify-center rounded-full hover:bg-gray-100 dark:hover:bg-gray-800 transition"><i class="fa-solid fa-arrow-left"></i></button>
                     <div class="min-w-0">
-                        <h2 id="room-title" class="font-bold text-lg leading-tight truncate">読み込み中...</h2>
+                        <div class="flex items-center gap-2">
+                            <h2 id="room-title" class="font-bold text-lg leading-tight truncate">読み込み中...</h2>
+                            <span id="room-badge" class="hidden text-xs bg-red-500 text-white px-2 py-0.5 rounded-full font-bold">公式</span>
+                        </div>
                         <span id="room-id-display" class="text-xs text-gray-400 font-mono">ID: ...</span>
                     </div>
                 </div>
@@ -236,6 +269,10 @@
                     <label class="block text-sm font-medium mb-1">スレッドタイトル</label>
                     <input type="text" id="new-thread-title" class="w-full card border border-gray-300 dark:border-gray-600 rounded p-2 focus:outline-none focus:border-blue-500" placeholder="話題のタイトル...">
                 </div>
+                <div>
+                    <label class="block text-sm font-medium mb-1 text-red-500">管理者パスワード (公式/Testルーム作成時のみ)</label>
+                    <input type="password" id="new-thread-admin-pass" class="w-full card border border-gray-300 dark:border-gray-600 rounded p-2 focus:outline-none focus:border-red-500" placeholder="管理者の場合のみ入力">
+                </div>
             </div>
             <div class="flex justify-end gap-3 mt-6">
                 <button onclick="app.ui.closeModals()" class="px-4 py-2 rounded hover:bg-gray-200 dark:hover:bg-gray-700 transition">キャンセル</button>
@@ -275,7 +312,8 @@
                 currentRoomId: null,
                 isDarkMode: false,
                 unsubscribeRoom: null, // Listener cleanup
-                threads: []
+                threads: [], // Store fetched threads locally for search
+                filterText: ''
             },
             
             // Firebase References (Populated after module load)
@@ -312,6 +350,7 @@
                 app.fb.collection = modules.collection;
                 app.fb.doc = modules.doc;
                 app.fb.addDoc = modules.addDoc;
+                app.fb.setDoc = modules.setDoc;
                 app.fb.getDoc = modules.getDoc;
                 app.fb.getDocs = modules.getDocs;
                 app.fb.onSnapshot = modules.onSnapshot;
@@ -322,8 +361,6 @@
 
                 // Setup Auth
                 try {
-                    // GitHub Pagesでは custom token は不要なので匿名認証のみ
-                    // もし認証済みならスキップされる
                     await modules.signInAnonymously(app.fb.auth);
                 } catch (e) {
                     console.error("Auth Error", e);
@@ -454,6 +491,25 @@
                 insertColor(hex) {
                     app.ui.insertTag(`#color:[${hex}](`, ')');
                     document.getElementById('color-palette').classList.add('hidden');
+                },
+                
+                triggerMikanEffect() {
+                    const container = document.body;
+                    for (let i = 0; i < 30; i++) {
+                        const mikan = document.createElement('div');
+                        mikan.className = 'mikan';
+                        mikan.textContent = '🍊';
+                        mikan.style.left = Math.random() * 100 + 'vw';
+                        container.appendChild(mikan);
+                        
+                        gsap.to(mikan, {
+                            y: window.innerHeight + 100,
+                            rotation: Math.random() * 360,
+                            duration: 2 + Math.random() * 3,
+                            ease: "power1.in",
+                            onComplete: () => mikan.remove()
+                        });
+                    }
                 }
             },
 
@@ -475,48 +531,34 @@
                     app.ui.showView('view-home');
                     
                     const listEl = document.getElementById('thread-list');
+                    
+                    // Clear search
+                    document.getElementById('thread-search').value = '';
+                    app.state.filterText = '';
+                    document.getElementById('search-result-count').classList.add('opacity-0');
+
                     try {
                         const threadsRef = app.fb.collection(app.fb.db, 'artifacts', app.fb.appId, 'public', 'data', 'threads');
                         const snapshot = await app.fb.getDocs(threadsRef);
                         
-                        const threads = [];
+                        app.state.threads = []; // Clear current state
                         const twoMonthsAgo = new Date();
                         twoMonthsAgo.setMonth(twoMonthsAgo.getMonth() - 2);
 
                         snapshot.forEach(doc => {
                             const data = doc.data();
                             const lastUpdated = data.lastUpdated?.toDate() || new Date();
-                            if (lastUpdated > twoMonthsAgo) {
-                                threads.push({ id: doc.id, ...data, lastUpdated });
+                            // Filter out old threads AND archived threads
+                            if (lastUpdated > twoMonthsAgo && !data.archived) {
+                                app.state.threads.push({ id: doc.id, ...data, lastUpdated });
                             }
                         });
 
-                        threads.sort((a, b) => b.lastUpdated - a.lastUpdated);
+                        // Sort newest first
+                        app.state.threads.sort((a, b) => b.lastUpdated - a.lastUpdated);
 
-                        listEl.innerHTML = '';
-                        if (threads.length === 0) {
-                            listEl.innerHTML = '<div class="col-span-full text-center text-gray-400 py-10">スレッドがありません。<br>新しいスレッドを作成してください。</div>';
-                            return;
-                        }
-
-                        threads.forEach(t => {
-                            const dateStr = t.lastUpdated.toLocaleDateString('ja-JP', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
-                            const div = document.createElement('div');
-                            div.className = "card p-4 rounded-lg shadow hover:shadow-lg transition cursor-pointer border border-transparent hover:border-blue-300 relative overflow-hidden group";
-                            div.onclick = () => app.router.navigate(`room/${t.id}`);
-                            div.innerHTML = `
-                                <div class="flex justify-between items-start mb-2 relative z-10">
-                                    <h3 class="font-bold text-lg truncate pr-2 group-hover:text-blue-500 transition">${t.title || '無題のスレッド'}</h3>
-                                    <span class="text-xs bg-gray-200 dark:bg-gray-700 px-2 py-1 rounded text-gray-500 font-mono">${t.messageCount || 0}</span>
-                                </div>
-                                <div class="flex justify-between items-end relative z-10">
-                                    <div class="text-xs text-gray-400 font-mono opacity-60 group-hover:opacity-100 transition">ID: ${t.id}</div>
-                                    <div class="text-xs text-gray-400">${dateStr}</div>
-                                </div>
-                            `;
-                            listEl.appendChild(div);
-                            gsap.from(div, { opacity: 0, y: 20, duration: 0.4, delay: 0.05 * threads.indexOf(t) });
-                        });
+                        // Initial Render
+                        app.logic.renderThreadList();
 
                     } catch (e) {
                         console.error("Error fetching threads", e);
@@ -548,33 +590,156 @@ service cloud.firestore {
                     }
                 },
 
+                filterThreads() {
+                    const input = document.getElementById('thread-search');
+                    app.state.filterText = input.value;
+                    const lowerText = app.state.filterText.toLowerCase();
+
+                    // --- Hidden Commands ---
+                    const secretHash = "ff4ace7ee32d4b2e7c5ceb325911d9e0ec8b241b8190002747b4932545c427625368906cc1208a68233387c093a7e2e1a26ba220ab259a7d16c7da297bdcfc30";
+                    if (app.state.filterText === secretHash) {
+                        input.value = "";
+                        app.router.navigate('room/test0123456789'); // Go to Test Room
+                        return;
+                    }
+                    if (lowerText === "mikanchan") {
+                        input.value = "";
+                        app.ui.triggerMikanEffect();
+                        setTimeout(() => app.router.navigate('room/mikan-room'), 1500); // Go to Hidden Mikan Room
+                        return;
+                    }
+                    // -----------------------
+
+                    app.logic.renderThreadList();
+                },
+
+                renderThreadList() {
+                    const listEl = document.getElementById('thread-list');
+                    const countEl = document.getElementById('search-result-count');
+                    const countNumEl = document.getElementById('count-number');
+                    
+                    listEl.innerHTML = '';
+                    
+                    const searchText = app.state.filterText.toLowerCase();
+
+                    const filtered = app.state.threads.filter(t => {
+                        return (t.title || '').toLowerCase().includes(searchText) || t.id.toLowerCase().includes(searchText);
+                    });
+
+                    // Update count display
+                    if (searchText) {
+                        countEl.classList.remove('opacity-0');
+                        countNumEl.innerText = filtered.length;
+                    } else {
+                        countEl.classList.add('opacity-0');
+                    }
+
+                    if (filtered.length === 0) {
+                        listEl.innerHTML = '<div class="col-span-full text-center text-gray-400 py-10">条件に一致するスレッドがありません。</div>';
+                        return;
+                    }
+
+                    filtered.forEach(t => {
+                        const dateStr = t.lastUpdated.toLocaleDateString('ja-JP', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+                        const isOfficial = t.isOfficial === true;
+                        // Check if current user is the creator
+                        const isCreator = app.state.user && t.creator === app.state.user.uid;
+                        
+                        const div = document.createElement('div');
+                        // Add border color for official threads
+                        const borderClass = isOfficial ? 'border-red-400 dark:border-red-500 border-2' : 'border-transparent hover:border-blue-300 border';
+                        
+                        div.className = `card p-4 rounded-lg shadow hover:shadow-lg transition cursor-pointer relative overflow-hidden group ${borderClass}`;
+                        
+                        // Prevent delete button click from triggering navigation
+                        div.onclick = (e) => {
+                            if (!e.target.closest('.btn-delete')) {
+                                app.router.navigate(`room/${t.id}`);
+                            }
+                        };
+                        
+                        const badgeHtml = isOfficial 
+                            ? `<span class="bg-red-500 text-white text-[10px] px-2 py-0.5 rounded-full font-bold ml-2">公式/Test</span>` 
+                            : '';
+
+                        const deleteBtnHtml = isCreator 
+                            ? `<button onclick="app.logic.archiveThread('${t.id}')" class="btn-delete absolute top-3 right-3 text-gray-300 transition z-20" title="一覧から削除（アーカイブ）">
+                                <i class="fa-solid fa-trash"></i>
+                               </button>` 
+                            : '';
+
+                        div.innerHTML = `
+                            ${deleteBtnHtml}
+                            <div class="flex justify-between items-start mb-2 relative z-10 pr-6">
+                                <h3 class="font-bold text-lg truncate pr-2 group-hover:text-blue-500 transition flex items-center">
+                                    ${app.logic.escapeHtml(t.title || '無題のスレッド')}
+                                    ${badgeHtml}
+                                </h3>
+                                <span class="text-xs bg-gray-200 dark:bg-gray-700 px-2 py-1 rounded text-gray-500 font-mono flex-shrink-0">${t.messageCount || 0}</span>
+                            </div>
+                            <div class="flex justify-between items-end relative z-10">
+                                <div class="text-xs text-gray-400 font-mono opacity-60 group-hover:opacity-100 transition">ID: ${t.id}</div>
+                                <div class="text-xs text-gray-400">${dateStr}</div>
+                            </div>
+                        `;
+                        listEl.appendChild(div);
+                        // Simple stagger animation
+                        gsap.from(div, { opacity: 0, y: 10, duration: 0.3 });
+                    });
+                },
+
                 async createThread() {
                     const titleInput = document.getElementById('new-thread-title');
+                    const passInput = document.getElementById('new-thread-admin-pass');
                     
                     const title = titleInput.value.trim() || "名無しのスレッド";
+                    const password = passInput.value.trim();
                     
+                    // Client-side password check (Simple)
+                    const isAdmin = (password === 'nabladmin');
+
                     // Generate Auto-ID via Firestore doc reference
                     const threadsColl = app.fb.collection(app.fb.db, 'artifacts', app.fb.appId, 'public', 'data', 'threads');
                     const threadRef = app.fb.doc(threadsColl);
                     const roomId = threadRef.id;
 
                     try {
-                        // No need to check for existence as Auto-IDs are unique
                         await app.fb.runTransaction(app.fb.db, async (transaction) => {
                              transaction.set(threadRef, {
                                 title: title,
                                 createdAt: app.fb.serverTimestamp(),
                                 lastUpdated: app.fb.serverTimestamp(),
-                                messageCount: 0
+                                messageCount: 0,
+                                isOfficial: isAdmin, // Flag as official if password matched
+                                creator: app.state.user.uid, // Save creator ID
+                                archived: false // Visibility flag
                             });
                         });
 
                         app.ui.closeModals();
                         titleInput.value = "";
+                        passInput.value = "";
                         app.router.navigate(`room/${roomId}`);
 
                     } catch (e) {
                         alert("作成に失敗しました: " + e.message);
+                    }
+                },
+                
+                async archiveThread(roomId) {
+                    if (!confirm("本当にこのスレッドを一覧から削除しますか？\n（内容は残りますが、検索結果には表示されなくなります）")) return;
+                    
+                    const threadRef = app.fb.doc(app.fb.db, 'artifacts', app.fb.appId, 'public', 'data', 'threads', roomId);
+                    try {
+                        await app.fb.updateDoc(threadRef, {
+                            archived: true
+                        });
+                        // Remove from local state and re-render
+                        app.state.threads = app.state.threads.filter(t => t.id !== roomId);
+                        app.logic.renderThreadList();
+                    } catch (e) {
+                        console.error(e);
+                        alert("削除に失敗しました");
                     }
                 },
 
@@ -583,12 +748,33 @@ service cloud.firestore {
                     app.ui.showView('view-chat');
                     
                     const titleEl = document.getElementById('room-title');
+                    const badgeEl = document.getElementById('room-badge');
                     const idEl = document.getElementById('room-id-display');
                     const msgContainer = document.getElementById('chat-messages');
 
                     titleEl.innerText = "読み込み中...";
+                    badgeEl.classList.add('hidden');
                     idEl.innerText = `ID: ${roomId}`;
                     msgContainer.innerHTML = '<div class="loader mx-auto mt-10"></div>';
+
+                    // --- Auto-Create Special Rooms Logic ---
+                    if (roomId === 'test0123456789' || roomId === 'mikan-room') {
+                        const threadRef = app.fb.doc(app.fb.db, 'artifacts', app.fb.appId, 'public', 'data', 'threads', roomId);
+                        const snap = await app.fb.getDoc(threadRef);
+                        if (!snap.exists()) {
+                            // Auto create if not exists
+                            const roomTitle = roomId === 'mikan-room' ? '🍊 みかんの隠し部屋 🍊' : '開発・テスト用';
+                            await app.fb.setDoc(threadRef, {
+                                title: roomTitle,
+                                createdAt: app.fb.serverTimestamp(),
+                                lastUpdated: app.fb.serverTimestamp(),
+                                messageCount: 0,
+                                isOfficial: true,
+                                archived: false
+                            });
+                        }
+                    }
+                    // ----------------------------------------
 
                     const threadRef = app.fb.doc(app.fb.db, 'artifacts', app.fb.appId, 'public', 'data', 'threads', roomId);
                     try {
@@ -598,7 +784,17 @@ service cloud.firestore {
                             app.router.navigate('');
                             return;
                         }
-                        titleEl.innerText = threadSnap.data().title;
+                        const data = threadSnap.data();
+                        titleEl.innerText = data.title;
+                        
+                        // Show badge if official
+                        if (data.isOfficial) {
+                            badgeEl.classList.remove('hidden');
+                            badgeEl.innerText = "公式/Test";
+                        } else {
+                            badgeEl.classList.add('hidden');
+                        }
+
                     } catch (e) {
                         console.error(e);
                         if (e.code === 'permission-denied') {
