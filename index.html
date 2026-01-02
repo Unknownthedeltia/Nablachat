@@ -4,6 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Nablachat</title>
+    <!-- ファビコンを追加 -->
+    <link rel="icon" href="favicon.ico">
     
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
@@ -97,6 +99,38 @@
         .msg-italic { font-style: italic; }
         .msg-underline { text-decoration: underline; }
         
+        /* NEW STYLES: Spoiler & Code */
+        .spoiler {
+            background-color: #1f2937;
+            color: #1f2937; /* Hide text initially */
+            padding: 0 4px;
+            border-radius: 4px;
+            cursor: pointer;
+            user-select: none;
+            transition: color 0.2s, background-color 0.2s;
+        }
+        .spoiler.revealed {
+            color: #f3f4f6; /* Show text (light) */
+        }
+        body:not(.dark-mode) .spoiler.revealed {
+            color: #ffffff;
+        }
+        
+        .inline-code {
+            background-color: #e5e7eb;
+            color: #be185d;
+            font-family: monospace;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-size: 0.9em;
+            border: 1px solid #d1d5db;
+        }
+        body.dark-mode .inline-code {
+            background-color: #374151;
+            color: #f472b6;
+            border-color: #4b5563;
+        }
+
         /* Message Number Badge */
         .msg-number {
             background-color: var(--msg-num-bg);
@@ -182,6 +216,35 @@
         #view-admin {
             z-index: 60; 
         }
+
+        /* Native Color Picker Styled */
+        .native-color-picker-wrapper {
+            position: relative;
+            width: 24px;
+            height: 24px;
+            border-radius: 50%;
+            overflow: hidden;
+            border: 1px solid #ccc;
+            cursor: pointer;
+            background: conic-gradient(red, yellow, lime, aqua, blue, magenta, red);
+            transition: transform 0.1s;
+        }
+        .native-color-picker-wrapper:hover {
+            transform: scale(1.1);
+        }
+        .native-color-picker-input {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 150%;
+            height: 150%;
+            padding: 0;
+            margin: 0;
+            border: none;
+            cursor: pointer;
+            opacity: 0;
+        }
     </style>
 </head>
 <body class="text-base h-screen flex flex-col overflow-hidden">
@@ -189,17 +252,12 @@
     <!-- Header -->
     <header class="card shadow-md z-10 p-4 flex justify-between items-center h-16 shrink-0">
         <div class="flex items-center gap-2 cursor-pointer" onclick="app.router.navigate('')">
-            <!-- 
-                【ロゴ画像の変更方法】
-                以下の img タグの src 属性を、使いたい画像のURLやパスに書き換えてください。
-                例: src="./my-logo.png" または src="https://example.com/logo.jpg"
-            -->
-            <img src="nablog2.png" 
+            <!-- Logo: Reset to nablog2.png -->
+            <img src="./nablog2.png" 
                  alt="Nablachat Logo" 
                  class="h-10 object-contain hover:opacity-80 transition"
                  onerror="this.style.display='none'; document.getElementById('fallback-logo').style.display='flex';">
             
-            <!-- 画像読み込みエラー時のフォールバック -->
             <div id="fallback-logo" style="display:none;" class="flex items-center gap-2">
                 <i class="fa-solid fa-shapes text-2xl text-blue-500"></i>
                 <h1 class="text-xl font-bold tracking-wider">Nablachat</h1>
@@ -265,6 +323,7 @@
                         <div class="flex items-center gap-2">
                             <h2 id="room-title" class="font-bold text-lg leading-tight truncate">読み込み中...</h2>
                             <span id="room-badge" class="hidden text-xs bg-red-500 text-white px-2 py-0.5 rounded-full font-bold">公式</span>
+                            <span id="room-private-badge" class="hidden text-xs bg-gray-600 text-white px-2 py-0.5 rounded-full font-bold"><i class="fa-solid fa-lock mr-1"></i>Private</span>
                         </div>
                         <span id="room-id-display" class="text-xs text-gray-400 font-mono">ID: ...</span>
                     </div>
@@ -291,25 +350,28 @@
                             <i class="fa-solid fa-underline"></i>
                         </button>
                         
-                        <!-- Color Picker Toggle -->
-                        <div class="relative">
-                            <button type="button" onclick="app.ui.toggleColorPalette(event)" class="p-2 rounded hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-600 dark:text-gray-300 transition" title="文字色">
-                                <i class="fa-solid fa-palette"></i>
-                            </button>
-                            <div id="color-palette" class="color-palette hidden">
-                                <button type="button" class="color-swatch" style="background-color: #ef4444;" onclick="app.ui.insertColor('#ef4444')"></button>
-                                <button type="button" class="color-swatch" style="background-color: #3b82f6;" onclick="app.ui.insertColor('#3b82f6')"></button>
-                                <button type="button" class="color-swatch" style="background-color: #22c55e;" onclick="app.ui.insertColor('#22c55e')"></button>
-                                <button type="button" class="color-swatch" style="background-color: #eab308;" onclick="app.ui.insertColor('#eab308')"></button>
-                                <button type="button" class="color-swatch" style="background-color: #a855f7;" onclick="app.ui.insertColor('#a855f7')"></button>
-                                <button type="button" class="color-swatch" style="background-color: #6b7280;" onclick="app.ui.insertColor('#6b7280')"></button>
-                                <button type="button" class="color-swatch" style="background-color: #ec4899;" onclick="app.ui.insertColor('#ec4899')"></button>
-                                <button type="button" class="color-swatch" style="background-color: #6366f1;" onclick="app.ui.insertColor('#6366f1')"></button>
+                        <!-- Simplified Color Selection -->
+                        <div class="flex gap-1 items-center mx-1">
+                            <button type="button" onclick="app.ui.insertColor('#ef4444')" class="w-5 h-5 rounded-full bg-red-500 hover:scale-110 transition shadow-sm border border-gray-300" title="赤"></button>
+                            <button type="button" onclick="app.ui.insertColor('#3b82f6')" class="w-5 h-5 rounded-full bg-blue-500 hover:scale-110 transition shadow-sm border border-gray-300" title="青"></button>
+                            <button type="button" onclick="app.ui.insertColor('#22c55e')" class="w-5 h-5 rounded-full bg-green-500 hover:scale-110 transition shadow-sm border border-gray-300" title="緑"></button>
+                            <div class="native-color-picker-wrapper" title="自由な色を選択">
+                                <input type="color" class="native-color-picker-input" onchange="app.ui.insertColor(this.value); this.value='#000000';">
                             </div>
                         </div>
 
                         <button type="button" onclick="app.ui.insertTag('>>', '')" class="p-2 rounded hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-600 dark:text-gray-300 transition" title="アンカー">
                             <i class="fa-solid fa-reply"></i>
+                        </button>
+                        
+                        <button type="button" onclick="app.ui.insertTag('||', '||')" class="p-2 rounded hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-600 dark:text-gray-300 transition" title="スポイラー">
+                            <i class="fa-solid fa-eye-slash"></i>
+                        </button>
+                        <button type="button" onclick="app.ui.insertTag('`', '`')" class="p-2 rounded hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-600 dark:text-gray-300 transition" title="コード">
+                            <i class="fa-solid fa-code"></i>
+                        </button>
+                         <button type="button" onclick="app.ui.insertTag('\\[', ']')" class="p-2 rounded hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-600 dark:text-gray-300 transition" title="装飾無効化">
+                            <i class="fa-solid fa-ban"></i>
                         </button>
 
                         <div class="border-l border-gray-300 dark:border-gray-600 h-6 mx-1"></div>
@@ -317,7 +379,6 @@
                         <input type="text" id="input-name" placeholder="名前 (任意)" class="bg-transparent border-none text-sm focus:outline-none w-24 text-gray-600 dark:text-gray-300">
                     </div>
 
-                    <!-- Text Area & Send -->
                     <div class="flex gap-2 items-end">
                         <textarea id="input-content" rows="1" placeholder="メッセージを入力..." class="card border border-gray-300 dark:border-gray-600 rounded-xl px-4 py-3 w-full focus:outline-none focus:border-blue-500 resize-none transition-all focus:ring-2 focus:ring-blue-100 dark:focus:ring-blue-900" style="min-height: 48px; max-height: 120px;"></textarea>
                         <button type="submit" class="bg-blue-600 hover:bg-blue-700 text-white w-12 h-12 rounded-full shadow-lg flex items-center justify-center transition transform active:scale-95 shrink-0">
@@ -359,8 +420,7 @@
 
     </main>
 
-    <!-- Modals (All use modal-overlay class) -->
-    
+    <!-- Modals -->
     <!-- Create Thread Modal -->
     <div id="modal-create" class="modal-overlay">
         <div class="card p-6 rounded-xl shadow-2xl w-full max-w-md transform transition-all duration-300" id="modal-create-content">
@@ -370,6 +430,21 @@
                     <label class="block text-sm font-medium mb-1">スレッドタイトル</label>
                     <input type="text" id="new-thread-title" class="w-full card border border-gray-300 dark:border-gray-600 rounded p-2 focus:outline-none focus:border-blue-500" placeholder="話題のタイトル...">
                 </div>
+                
+                <!-- NEW: Private Thread Option -->
+                <div class="p-4 bg-gray-50 dark:bg-gray-800 rounded border border-gray-200 dark:border-gray-700">
+                    <label class="flex items-center space-x-2 cursor-pointer mb-2">
+                        <input type="checkbox" id="new-thread-private" class="accent-blue-500 w-4 h-4" onchange="document.getElementById('new-thread-pass-container').classList.toggle('hidden')">
+                        <span class="text-sm font-bold text-gray-700 dark:text-gray-200">プライベートスレッドにする</span>
+                    </label>
+                    <p class="text-xs text-gray-500 dark:text-gray-400 ml-6 mb-2">一覧や検索に表示されず、IDを知っている人だけが参加できます。</p>
+                    
+                    <div id="new-thread-pass-container" class="hidden ml-6">
+                        <label class="block text-xs font-medium mb-1">合言葉（パスワード）<span class="text-gray-400 font-normal"> - 任意</span></label>
+                        <input type="text" id="new-thread-password" class="w-full card border border-gray-300 dark:border-gray-600 rounded p-2 text-sm focus:outline-none focus:border-blue-500" placeholder="設定すると入室時に必要になります">
+                    </div>
+                </div>
+
                 <div>
                     <label class="block text-sm font-medium mb-1 text-red-500">管理者パスワード (公式/Testルーム作成時のみ)</label>
                     <input type="password" id="new-thread-admin-pass" class="w-full card border border-gray-300 dark:border-gray-600 rounded p-2 focus:outline-none focus:border-red-500" placeholder="管理者の場合のみ入力">
@@ -378,6 +453,21 @@
             <div class="flex justify-end gap-3 mt-6">
                 <button onclick="app.ui.closeModals()" class="px-4 py-2 rounded hover:bg-gray-200 dark:hover:bg-gray-700 transition">キャンセル</button>
                 <button onclick="app.logic.createThread()" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded shadow transition">作成</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- NEW: Room Password Modal -->
+    <div id="modal-room-password" class="modal-overlay">
+        <div class="card p-6 rounded-xl shadow-2xl w-full max-w-sm transform transition-all duration-300" id="modal-room-password-content">
+            <h3 class="text-lg font-bold mb-4 flex items-center gap-2">
+                <i class="fa-solid fa-lock text-gray-500"></i> 合言葉が必要です
+            </h3>
+            <p class="text-sm text-gray-600 dark:text-gray-300 mb-4">このスレッドに入室するには合言葉を入力してください。</p>
+            <input type="password" id="room-auth-input" class="w-full card border border-gray-300 dark:border-gray-600 rounded p-2 mb-4 focus:outline-none focus:border-blue-500" placeholder="合言葉">
+            <div class="flex justify-end gap-3">
+                <button onclick="app.router.navigate('')" class="px-4 py-2 rounded hover:bg-gray-200 dark:hover:bg-gray-700 transition">戻る</button>
+                <button onclick="app.logic.verifyRoomPassword()" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded shadow transition">入室</button>
             </div>
         </div>
     </div>
@@ -413,6 +503,50 @@
         </div>
     </div>
 
+    <!-- Help Manual Modal -->
+    <div id="modal-help" class="modal-overlay">
+        <!-- 強制的にダークテーマ配色を適用 -->
+        <div class="bg-gray-900 text-gray-100 p-6 rounded-xl shadow-2xl w-full max-w-2xl transform transition-all duration-300 flex flex-col max-h-[85vh] border border-gray-700" id="modal-help-content">
+            <div class="flex justify-between items-center mb-4 border-b border-gray-700 pb-3">
+                <h3 class="text-xl font-bold flex items-center gap-2"><i class="fa-solid fa-book-open text-blue-400"></i>使い方マニュアル</h3>
+                <button onclick="app.ui.closeModals()" class="text-gray-400 hover:text-white transition"><i class="fa-solid fa-times"></i></button>
+            </div>
+            <div class="overflow-y-auto pr-2 space-y-6 text-sm">
+                <section>
+                    <h4 class="font-bold text-lg mb-2 text-blue-400">文字の装飾</h4>
+                    <ul class="list-disc pl-5 space-y-2 text-gray-300">
+                        <li><b>太字</b>: <code>**文字**</code> → <b>文字</b></li>
+                        <li><i>斜体</i>: <code>*文字*</code> → <i>文字</i></li>
+                        <li><u>下線</u>: <code>__文字__</code> → <u>文字</u></li>
+                        <li>色付き: ツールバーのカラーボタンを使用、または <code>#color:[#ff0000](文字)</code></li>
+                        <li>ネタバレ防止: <code>||文字||</code> → <span class="bg-gray-700 text-gray-700 px-1 rounded cursor-pointer select-none hover:text-white transition-colors">文字</span> (クリックで表示)</li>
+                        <li>コード: <code>`文字`</code> → <code class="bg-gray-800 px-1 rounded border border-gray-700 font-mono text-pink-400">文字</code> (等幅フォント・装飾なし)</li>
+                        <li>装飾無効: <code>\[文字]</code> → そのまま表示</li>
+                        <li>アンカー: <code>>>1</code> → 指定した番号の書き込みへリンク</li>
+                    </ul>
+                </section>
+                <section>
+                    <h4 class="font-bold text-lg mb-2 text-blue-400">スレッド機能</h4>
+                    <ul class="list-disc pl-5 space-y-2 text-gray-300">
+                        <li><b>保存（お気に入り）</b>: 一度入室したスレッドは「保存したスレッド」タブに自動追加されます。リストから削除ボタンで解除できます。</li>
+                        <li><b>ピン留め</b>: <i class="fa-solid fa-thumbtack"></i> ボタンでスレッドをリストの一番上に固定できます。</li>
+                        <li><b>プライベートスレッド</b>: 作成時に「プライベート」にチェックを入れると、検索や一覧に表示されません。IDを知っている人だけが参加できます。合言葉も設定可能です。</li>
+                    </ul>
+                </section>
+                <section>
+                    <h4 class="font-bold text-lg mb-2 text-blue-400">その他</h4>
+                    <ul class="list-disc pl-5 space-y-2 text-gray-300">
+                        <li><b>通報</b>: 不適切な書き込みは「通報」ボタンから報告してください。管理者が確認します。</li>
+                        <li><b>スレッドの寿命</b>: 最後の書き込みから2ヶ月経過したスレッドは表示されなくなります。</li>
+                    </ul>
+                </section>
+            </div>
+            <div class="mt-4 pt-3 border-t border-gray-700 text-right">
+                <button onclick="app.ui.closeModals()" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded shadow transition">閉じる</button>
+            </div>
+        </div>
+    </div>
+
     <!-- Settings Modal -->
     <div id="modal-settings" class="modal-overlay">
         <div class="card p-6 rounded-t-xl md:rounded-xl shadow-2xl w-full max-w-md transform transition-all duration-300" id="modal-settings-content">
@@ -431,6 +565,13 @@
                 <div>
                     <label class="block mb-2">文字サイズ</label>
                     <input type="range" min="12" max="24" value="16" id="font-size-slider" class="w-full accent-blue-500" oninput="app.ui.changeFontSize(this.value)">
+                </div>
+                
+                <div>
+                    <button onclick="app.ui.showHelpModal()" class="w-full text-left py-2 px-3 rounded hover:bg-gray-100 dark:hover:bg-gray-800 transition flex items-center gap-2">
+                        <i class="fa-solid fa-book-open text-blue-500"></i>
+                        <span>使い方マニュアル</span>
+                    </button>
                 </div>
                 
                 <div class="pt-4 border-t border-gray-200 dark:border-gray-700">
@@ -484,7 +625,8 @@
                 currentTab: 'saved', // 'saved' (default) or 'all'
                 unsubscribeThreadInfo: null, // Listener for thread meta info
                 isAdmin: false, // Admin state
-                secretRooms: ['test0123456789', 'mikan-room'] // Define secret rooms
+                secretRooms: ['test0123456789', 'mikan-room'], // Define secret rooms
+                tempRoomAuth: null // Store room auth data temporarily
             },
             
             // Firebase References (Populated after module load)
@@ -554,7 +696,7 @@
                 // Close color palette when clicking outside
                 document.addEventListener('click', (e) => {
                     if (!e.target.closest('#toolbar')) {
-                        document.getElementById('color-palette').classList.add('hidden');
+                        // Just ensure UI focus is fine
                     }
                 });
             },
@@ -613,6 +755,21 @@
                     const modal = document.getElementById('modal-report');
                     modal.classList.add('active');
                 },
+                
+                showRoomPasswordModal(roomId, correctPassword) {
+                    app.ui.closeModals();
+                    // Store target info for verification
+                    app.state.tempRoomAuth = { roomId, correctPassword };
+                    
+                    document.getElementById('room-auth-input').value = "";
+                    const modal = document.getElementById('modal-room-password');
+                    modal.classList.add('active');
+                },
+                
+                showHelpModal() {
+                    app.ui.closeModals();
+                    document.getElementById('modal-help').classList.add('active');
+                },
 
                 showConfirm(message, onConfirm) {
                     app.ui.closeModals();
@@ -646,7 +803,7 @@
 
                 // FIXED: Robust modal closing targeting IDs
                 closeModals() {
-                    const modalIds = ['modal-create', 'modal-report', 'modal-settings', 'modal-admin-login', 'modal-confirm'];
+                    const modalIds = ['modal-create', 'modal-report', 'modal-settings', 'modal-admin-login', 'modal-confirm', 'modal-room-password', 'modal-help'];
                     modalIds.forEach(id => {
                         const m = document.getElementById(id);
                         if (m) m.classList.remove('active');
@@ -706,15 +863,8 @@
                     textarea.selectionEnd = end + startTag.length;
                 },
 
-                toggleColorPalette(e) {
-                    if(e) e.preventDefault(); 
-                    const palette = document.getElementById('color-palette');
-                    palette.classList.toggle('hidden');
-                },
-
                 insertColor(hex) {
                     app.ui.insertTag(`#color:[${hex}](`, ')');
-                    document.getElementById('color-palette').classList.add('hidden');
                 },
                 
                 triggerMikanEffect() {
@@ -724,8 +874,7 @@
                         mikan.className = 'mikan';
                         mikan.textContent = '🍊';
                         mikan.style.left = Math.random() * 100 + 'vw';
-                        // Use simple CSS animation instead of GSAP if needed, or keeping GSAP here is fine as it's isolated
-                        // For safety, removing GSAP dependency here too
+                        // Use simple CSS animation
                         mikan.style.transition = `top ${2 + Math.random() * 3}s ease-in, transform 3s`;
                         mikan.style.top = '-50px';
                         container.appendChild(mikan);
@@ -914,6 +1063,11 @@ service cloud.firestore {
                     filtered = filtered.filter(t => {
                         // Secret rooms check
                         if (app.state.secretRooms.includes(t.id) && !app.state.isAdmin) return false;
+                        
+                        // Private threads check: Hide private threads from "All" tab
+                        if (t.isPrivate && !isSavedTab) {
+                            return false; // Don't show in search unless already saved/joined
+                        }
 
                         const isSaved = app.state.savedThreads.has(t.id);
                         return isSavedTab ? isSaved : true;
@@ -972,6 +1126,11 @@ service cloud.firestore {
                         const badgeHtml = isOfficial 
                             ? `<span class="bg-red-500 text-white text-[10px] px-2 py-0.5 rounded-full font-bold ml-2">公式/Test</span>` 
                             : '';
+                        
+                        // Private icon
+                        const privateHtml = t.isPrivate
+                            ? `<i class="fa-solid fa-lock text-gray-400 text-xs ml-2" title="プライベート"></i>`
+                            : '';
 
                         let actionBtns = '';
                         
@@ -1009,8 +1168,11 @@ service cloud.firestore {
                                     ${isPinned ? '<i class="fa-solid fa-thumbtack text-blue-500 mr-1 text-sm"></i>' : ''}
                                     ${app.logic.escapeHtml(t.title || '無題のスレッド')}
                                     ${badgeHtml}
+                                    ${privateHtml}
                                 </h3>
-                                <span class="text-xs bg-gray-200 dark:bg-gray-700 px-2 py-1 rounded text-gray-500 font-mono flex-shrink-0">${t.messageCount || 0}</span>
+                                <span class="text-xs font-mono px-2 py-1 rounded-md flex-shrink-0 bg-blue-50 text-blue-600 border border-blue-100 dark:bg-gray-700 dark:text-blue-300 dark:border-gray-600 shadow-sm font-bold" title="レス数">
+                                    <i class="fa-regular fa-comment-dots mr-1"></i>${t.messageCount || 0}
+                                </span>
                             </div>
                             <div class="flex justify-between items-end relative z-10">
                                 <div class="text-xs text-gray-400 font-mono opacity-60 group-hover:opacity-100 transition">ID: ${t.id}</div>
@@ -1025,9 +1187,15 @@ service cloud.firestore {
                     const titleInput = document.getElementById('new-thread-title');
                     const passInput = document.getElementById('new-thread-admin-pass');
                     
+                    const isPrivateInput = document.getElementById('new-thread-private');
+                    const roomPassInput = document.getElementById('new-thread-password');
+                    
                     const title = titleInput.value.trim() || "名無しのスレッド";
                     const password = passInput.value.trim();
                     const isAdmin = (password === 'nabladmin');
+                    
+                    const isPrivate = isPrivateInput.checked;
+                    const roomPassword = roomPassInput.value.trim();
 
                     const threadsColl = app.fb.collection(app.fb.db, 'artifacts', app.fb.appId, 'public', 'data', 'threads');
                     const threadRef = app.fb.doc(threadsColl);
@@ -1042,7 +1210,9 @@ service cloud.firestore {
                                 messageCount: 0,
                                 isOfficial: isAdmin,
                                 creator: app.state.user.uid,
-                                archived: false
+                                archived: false,
+                                isPrivate: isPrivate,
+                                password: roomPassword // Can be empty string
                             });
                         });
 
@@ -1052,6 +1222,10 @@ service cloud.firestore {
                         app.ui.closeModals();
                         titleInput.value = "";
                         passInput.value = "";
+                        isPrivateInput.checked = false;
+                        roomPassInput.value = "";
+                        document.getElementById('new-thread-pass-container').classList.add('hidden');
+                        
                         app.router.navigate(`room/${roomId}`);
 
                     } catch (e) {
@@ -1250,7 +1424,6 @@ service cloud.firestore {
 
                 async enterRoom(roomId) {
                     if (app.state.unsubscribeThreadInfo) app.state.unsubscribeThreadInfo(); // Clear old listener
-                    app.state.currentRoomId = roomId;
                     
                     // Don't auto-save if it is a secret room unless admin
                     if (!app.state.secretRooms.includes(roomId) || app.state.isAdmin) {
@@ -1264,11 +1437,13 @@ service cloud.firestore {
                     
                     const titleEl = document.getElementById('room-title');
                     const badgeEl = document.getElementById('room-badge');
+                    const privateBadgeEl = document.getElementById('room-private-badge');
                     const idEl = document.getElementById('room-id-display');
                     const msgContainer = document.getElementById('chat-messages');
 
                     titleEl.innerText = "読み込み中...";
                     badgeEl.classList.add('hidden');
+                    privateBadgeEl.classList.add('hidden');
                     idEl.innerText = `ID: ${roomId}`;
                     msgContainer.innerHTML = '<div class="loader mx-auto mt-10"></div>';
 
@@ -1293,8 +1468,10 @@ service cloud.firestore {
                     // NEW: Realtime listener for thread existence/meta
                     app.state.unsubscribeThreadInfo = app.fb.onSnapshot(threadRef, (doc) => {
                         if (!doc.exists()) {
-                            alert("スレッドが削除されました。ホームに戻ります。");
-                            app.router.navigate('');
+                            // Only alert if we are not in secret room creation phase
+                            if (!app.state.secretRooms.includes(roomId)) {
+                                 // Might be deleted
+                            }
                             return;
                         }
                         const data = doc.data();
@@ -1306,6 +1483,13 @@ service cloud.firestore {
                         } else {
                             badgeEl.classList.add('hidden');
                         }
+                        
+                        if (data.isPrivate) {
+                            privateBadgeEl.classList.remove('hidden');
+                        } else {
+                            privateBadgeEl.classList.add('hidden');
+                        }
+                        
                     }, (error) => {
                         console.error("Thread Info Error", error);
                         if (error.code === 'permission-denied') {
@@ -1337,6 +1521,23 @@ service cloud.firestore {
                     
                     const initial = (msg.name || "名").charAt(0);
                     let safeContent = app.logic.escapeHtml(msg.content);
+
+                    // --- NEW: Advanced Formatting with Placeholders ---
+                    const placeholders = [];
+                    const addPlaceholder = (text) => {
+                        placeholders.push(text);
+                        return `%%%PH_${placeholders.length - 1}%%%`;
+                    };
+
+                    // 1. Escape \[...] (Highest priority)
+                    safeContent = safeContent.replace(/\\\[(.*?)]/g, (match, p1) => addPlaceholder(p1));
+
+                    // 2. Inline Code `...`
+                    safeContent = safeContent.replace(/`(.*?)`/g, (match, p1) => addPlaceholder(`<code class="inline-code">${p1}</code>`));
+
+                    // 3. Normal Formatting
+                    // Spoiler ||...||
+                    safeContent = safeContent.replace(/\|\|(.*?)\|\|/g, '<span class="spoiler" onclick="this.classList.toggle(\'revealed\')">$1</span>');
                     
                     safeContent = safeContent.replace(/>>(\d+)/g, '<span class="msg-anchor" onclick="app.ui.highlightMessage($1)">>>$1</span>');
                     safeContent = safeContent.replace(/\*\*(.*?)\*\*/g, '<span class="msg-bold">$1</span>');
@@ -1345,6 +1546,10 @@ service cloud.firestore {
                     safeContent = safeContent.replace(/#color:\[([a-zA-Z0-9#]+)\]\((.*?)\)/g, '<span style="color:$1">$2</span>');
                     safeContent = safeContent.replace(/(https?:\/\/[^\s<]+)/g, '<a href="$1" target="_blank" rel="noopener noreferrer">$1</a>');
                     safeContent = safeContent.replace(/\n/g, '<br>');
+
+                    // 4. Restore Placeholders
+                    safeContent = safeContent.replace(/%%%PH_(\d+)%%%/g, (match, id) => placeholders[id]);
+                    // --------------------------------------------------
 
                     const timeStr = msg.timestamp ? new Date(msg.timestamp.toMillis()).toLocaleTimeString('ja-JP', {hour:'2-digit', minute:'2-digit'}) : '--:--';
 
