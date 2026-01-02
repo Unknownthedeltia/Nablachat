@@ -440,8 +440,8 @@
                     <p class="text-xs text-gray-500 dark:text-gray-400 ml-6 mb-2">一覧や検索に表示されず、IDを知っている人だけが参加できます。</p>
                     
                     <div id="new-thread-pass-container" class="hidden ml-6">
-                        <label class="block text-xs font-medium mb-1">合言葉（パスワード）<span class="text-gray-400 font-normal"> - 任意</span></label>
-                        <input type="text" id="new-thread-password" class="w-full card border border-gray-300 dark:border-gray-600 rounded p-2 text-sm focus:outline-none focus:border-blue-500" placeholder="設定すると入室時に必要になります">
+                        <label class="block text-xs font-medium mb-1">合言葉（パスワード）<span class="text-gray-400 font-normal"> - 6桁の数字</span></label>
+                        <input type="number" id="new-thread-password" class="w-full card border border-gray-300 dark:border-gray-600 rounded p-2 text-sm focus:outline-none focus:border-blue-500" placeholder="6桁の数字 (任意)">
                     </div>
                 </div>
 
@@ -464,7 +464,7 @@
                 <i class="fa-solid fa-lock text-gray-500"></i> 合言葉が必要です
             </h3>
             <p class="text-sm text-gray-600 dark:text-gray-300 mb-4">このスレッドに入室するには合言葉を入力してください。</p>
-            <input type="password" id="room-auth-input" class="w-full card border border-gray-300 dark:border-gray-600 rounded p-2 mb-4 focus:outline-none focus:border-blue-500" placeholder="合言葉">
+            <input type="password" id="room-auth-input" class="w-full card border border-gray-300 dark:border-gray-600 rounded p-2 mb-4 focus:outline-none focus:border-blue-500" placeholder="6桁の数字">
             <div class="flex justify-end gap-3">
                 <button onclick="app.router.navigate('')" class="px-4 py-2 rounded hover:bg-gray-200 dark:hover:bg-gray-700 transition">戻る</button>
                 <button onclick="app.logic.verifyRoomPassword()" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded shadow transition">入室</button>
@@ -530,7 +530,7 @@
                     <ul class="list-disc pl-5 space-y-2 text-gray-300">
                         <li><b>保存（お気に入り）</b>: 一度入室したスレッドは「保存したスレッド」タブに自動追加されます。リストから削除ボタンで解除できます。</li>
                         <li><b>ピン留め</b>: <i class="fa-solid fa-thumbtack"></i> ボタンでスレッドをリストの一番上に固定できます。</li>
-                        <li><b>プライベートスレッド</b>: 作成時に「プライベート」にチェックを入れると、検索や一覧に表示されません。IDを知っている人だけが参加できます。合言葉も設定可能です。</li>
+                        <li><b>プライベートスレッド</b>: 作成時に「プライベート」にチェックを入れると、検索や一覧に表示されません。IDを知っている人だけが参加できます。合言葉（6桁数字）も設定可能です。</li>
                     </ul>
                 </section>
                 <section>
@@ -1065,8 +1065,8 @@ service cloud.firestore {
                         if (app.state.secretRooms.includes(t.id) && !app.state.isAdmin) return false;
                         
                         // Private threads check: Hide private threads from "All" tab
-                        if (t.isPrivate && !isSavedTab) {
-                            return false; // Don't show in search unless already saved/joined
+                        if (t.isPrivate && !isSavedTab && !app.state.isAdmin) { // FIX: Allow admins to see private threads
+                            return false; 
                         }
 
                         const isSaved = app.state.savedThreads.has(t.id);
@@ -1196,6 +1196,12 @@ service cloud.firestore {
                     
                     const isPrivate = isPrivateInput.checked;
                     const roomPassword = roomPassInput.value.trim();
+                    
+                    // FIX: Password validation
+                    if (isPrivate && roomPassword && !/^\d{6}$/.test(roomPassword)) {
+                        alert("パスワードは6桁の数字で入力してください。");
+                        return;
+                    }
 
                     const threadsColl = app.fb.collection(app.fb.db, 'artifacts', app.fb.appId, 'public', 'data', 'threads');
                     const threadRef = app.fb.doc(threadsColl);
@@ -1424,6 +1430,51 @@ service cloud.firestore {
 
                 async enterRoom(roomId) {
                     if (app.state.unsubscribeThreadInfo) app.state.unsubscribeThreadInfo(); // Clear old listener
+                    
+                    const threadRef = app.fb.doc(app.fb.db, 'artifacts', app.fb.appId, 'public', 'data', 'threads', roomId);
+                    
+                    // --- Pre-fetch check for password ---
+                    let isPrivate = false;
+                    let roomPassword = null;
+                    
+                    try {
+                        const snap = await app.fb.getDoc(threadRef);
+                        if (snap.exists()) {
+                            const d = snap.data();
+                            if (d.isPrivate) { // FIX: Use isPrivate field directly
+                                isPrivate = true;
+                                roomPassword = d.password;
+                            }
+                        }
+                    } catch(e) {
+                         // ignore, maybe new room
+                    }
+
+                    // If private and NOT already saved (joined), ask password
+                    // FIX: Admin bypass added
+                    if (isPrivate && !app.state.savedThreads.has(roomId) && !app.state.isAdmin) {
+                         app.ui.showRoomPasswordModal(roomId, roomPassword);
+                         return; // STOP here
+                    }
+
+                    app.logic.finalizeEnterRoom(roomId);
+                },
+                
+                verifyRoomPassword() {
+                    const input = document.getElementById('room-auth-input');
+                    const attempt = input.value;
+                    const { roomId, correctPassword } = app.state.tempRoomAuth;
+                    
+                    if (attempt === correctPassword) {
+                        app.ui.closeModals();
+                        app.logic.finalizeEnterRoom(roomId);
+                    } else {
+                        alert("合言葉が違います。");
+                    }
+                },
+                
+                async finalizeEnterRoom(roomId) {
+                    app.state.currentRoomId = roomId;
                     
                     // Don't auto-save if it is a secret room unless admin
                     if (!app.state.secretRooms.includes(roomId) || app.state.isAdmin) {
