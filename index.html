@@ -324,6 +324,8 @@
                             <h2 id="room-title" class="font-bold text-lg leading-tight truncate">読み込み中...</h2>
                             <span id="room-badge" class="hidden text-xs bg-red-500 text-white px-2 py-0.5 rounded-full font-bold">公式</span>
                             <span id="room-private-badge" class="hidden text-xs bg-gray-600 text-white px-2 py-0.5 rounded-full font-bold"><i class="fa-solid fa-lock mr-1"></i>Private</span>
+                            <!-- BGM Status Indicator -->
+                            <span id="room-bgm-status" class="hidden text-xs bg-pink-500 text-white px-2 py-0.5 rounded-full font-bold animate-pulse cursor-pointer" onclick="app.logic.toggleBGM()"><i class="fa-solid fa-music mr-1"></i>BGM ON</span>
                         </div>
                         <span id="room-id-display" class="text-xs text-gray-400 font-mono">ID: ...</span>
                     </div>
@@ -625,8 +627,9 @@
                 currentTab: 'saved', // 'saved' (default) or 'all'
                 unsubscribeThreadInfo: null, // Listener for thread meta info
                 isAdmin: false, // Admin state
-                secretRooms: ['test0123456789', 'mikan-room'], // Define secret rooms
-                tempRoomAuth: null // Store room auth data temporarily
+                secretRooms: ['test0123456789', 'mikan-room', 'funnycat'], // Define secret rooms
+                tempRoomAuth: null, // Store room auth data temporarily
+                bgmAudio: null // BGM Audio object
             },
             
             // Firebase References (Populated after module load)
@@ -713,6 +716,7 @@
 
                     if (hash === 'admin') {
                         app.state.currentRoomId = null;
+                        app.logic.stopBGM(); // Stop BGM if leaving room
                         if (!app.state.isAdmin) {
                             app.logic.openAdminLoginModal();
                         } else {
@@ -966,9 +970,67 @@
                     app.logic.renderThreadList();
                 },
 
+                // BGM Functions
+                playBGM(src) {
+                    app.logic.stopBGM();
+                    if (!src) return;
+                    
+                    const audio = new Audio(src);
+                    audio.loop = true;
+                    audio.volume = 0.3; 
+                    
+                    // Try auto-play
+                    const playPromise = audio.play();
+                    
+                    if (playPromise !== undefined) {
+                        playPromise.then(_ => {
+                            // Play started
+                            app.state.bgmAudio = audio;
+                            document.getElementById('room-bgm-status').classList.remove('hidden');
+                        }).catch(error => {
+                            // Auto-play blocked
+                            console.log("Auto-play blocked:", error);
+                            // Still set audio object but paused, show UI to play
+                            app.state.bgmAudio = audio;
+                            const statusEl = document.getElementById('room-bgm-status');
+                            statusEl.classList.remove('hidden');
+                            statusEl.classList.remove('bg-pink-500', 'animate-pulse');
+                            statusEl.classList.add('bg-gray-500');
+                            statusEl.innerHTML = '<i class="fa-solid fa-play mr-1"></i>BGM 再生';
+                        });
+                    }
+                },
+
+                stopBGM() {
+                    if (app.state.bgmAudio) {
+                        app.state.bgmAudio.pause();
+                        app.state.bgmAudio = null;
+                        document.getElementById('room-bgm-status').classList.add('hidden');
+                    }
+                },
+                
+                toggleBGM() {
+                    if (app.state.bgmAudio) {
+                        if (app.state.bgmAudio.paused) {
+                            app.state.bgmAudio.play();
+                            const statusEl = document.getElementById('room-bgm-status');
+                            statusEl.classList.remove('bg-gray-500');
+                            statusEl.classList.add('bg-pink-500', 'animate-pulse');
+                            statusEl.innerHTML = '<i class="fa-solid fa-music mr-1"></i>BGM ON';
+                        } else {
+                            app.state.bgmAudio.pause();
+                            const statusEl = document.getElementById('room-bgm-status');
+                            statusEl.classList.remove('bg-pink-500', 'animate-pulse');
+                            statusEl.classList.add('bg-gray-500');
+                            statusEl.innerHTML = '<i class="fa-solid fa-play mr-1"></i>BGM 停止中';
+                        }
+                    }
+                },
+
                 async showHome() {
                     if (app.state.unsubscribeRoom) app.state.unsubscribeRoom();
                     if (app.state.unsubscribeThreadInfo) app.state.unsubscribeThreadInfo(); // Clean up info listener
+                    app.logic.stopBGM(); // Stop BGM when going home
                     app.state.currentRoomId = null;
                     app.ui.showView('view-home');
                     
@@ -1040,6 +1102,11 @@ service cloud.firestore {
                         input.value = "";
                         app.ui.triggerMikanEffect();
                         setTimeout(() => app.router.navigate('room/mikan-room'), 1500); 
+                        return;
+                    }
+                    if (lowerText === "funnycat") {
+                        input.value = "";
+                        app.router.navigate('room/funnycat'); 
                         return;
                     }
 
@@ -1430,50 +1497,7 @@ service cloud.firestore {
 
                 async enterRoom(roomId) {
                     if (app.state.unsubscribeThreadInfo) app.state.unsubscribeThreadInfo(); // Clear old listener
-                    
-                    const threadRef = app.fb.doc(app.fb.db, 'artifacts', app.fb.appId, 'public', 'data', 'threads', roomId);
-                    
-                    // --- Pre-fetch check for password ---
-                    let isPrivate = false;
-                    let roomPassword = null;
-                    
-                    try {
-                        const snap = await app.fb.getDoc(threadRef);
-                        if (snap.exists()) {
-                            const d = snap.data();
-                            if (d.isPrivate) { // FIX: Use isPrivate field directly
-                                isPrivate = true;
-                                roomPassword = d.password;
-                            }
-                        }
-                    } catch(e) {
-                         // ignore, maybe new room
-                    }
-
-                    // If private and NOT already saved (joined), ask password
-                    // FIX: Admin bypass added
-                    if (isPrivate && !app.state.savedThreads.has(roomId) && !app.state.isAdmin) {
-                         app.ui.showRoomPasswordModal(roomId, roomPassword);
-                         return; // STOP here
-                    }
-
-                    app.logic.finalizeEnterRoom(roomId);
-                },
-                
-                verifyRoomPassword() {
-                    const input = document.getElementById('room-auth-input');
-                    const attempt = input.value;
-                    const { roomId, correctPassword } = app.state.tempRoomAuth;
-                    
-                    if (attempt === correctPassword) {
-                        app.ui.closeModals();
-                        app.logic.finalizeEnterRoom(roomId);
-                    } else {
-                        alert("合言葉が違います。");
-                    }
-                },
-                
-                async finalizeEnterRoom(roomId) {
+                    app.logic.stopBGM(); // Reset BGM state
                     app.state.currentRoomId = roomId;
                     
                     // Don't auto-save if it is a secret room unless admin
@@ -1490,19 +1514,26 @@ service cloud.firestore {
                     const badgeEl = document.getElementById('room-badge');
                     const privateBadgeEl = document.getElementById('room-private-badge');
                     const idEl = document.getElementById('room-id-display');
+                    const bgmStatusEl = document.getElementById('room-bgm-status');
                     const msgContainer = document.getElementById('chat-messages');
 
                     titleEl.innerText = "読み込み中...";
                     badgeEl.classList.add('hidden');
                     privateBadgeEl.classList.add('hidden');
+                    bgmStatusEl.classList.add('hidden'); // Reset BGM indicator
                     idEl.innerText = `ID: ${roomId}`;
                     msgContainer.innerHTML = '<div class="loader mx-auto mt-10"></div>';
-
-                    if (roomId === 'test0123456789' || roomId === 'mikan-room') {
+                    
+                    // Special Room Logic (Auto create)
+                    if (app.state.secretRooms.includes(roomId)) {
                         const threadRef = app.fb.doc(app.fb.db, 'artifacts', app.fb.appId, 'public', 'data', 'threads', roomId);
                         const snap = await app.fb.getDoc(threadRef);
                         if (!snap.exists()) {
-                            const roomTitle = roomId === 'mikan-room' ? '🍊 みかんの隠し部屋 🍊' : '開発・テスト用';
+                            let roomTitle = '秘密の部屋';
+                            if (roomId === 'mikan-room') roomTitle = '🍊 みかんの隠し部屋 🍊';
+                            if (roomId === 'test0123456789') roomTitle = '開発・テスト用';
+                            if (roomId === 'funnycat') roomTitle = '🐱 Funny Cat Room 🐱';
+
                             await app.fb.setDoc(threadRef, {
                                 title: roomTitle,
                                 createdAt: app.fb.serverTimestamp(),
@@ -1512,6 +1543,11 @@ service cloud.firestore {
                                 archived: false
                             });
                         }
+                        
+                        // BGM Logic for funnycat
+                        if (roomId === 'funnycat') {
+                             app.logic.playBGM('1161090_Funny-cat.mp3');
+                        }
                     }
 
                     const threadRef = app.fb.doc(app.fb.db, 'artifacts', app.fb.appId, 'public', 'data', 'threads', roomId);
@@ -1519,10 +1555,10 @@ service cloud.firestore {
                     // NEW: Realtime listener for thread existence/meta
                     app.state.unsubscribeThreadInfo = app.fb.onSnapshot(threadRef, (doc) => {
                         if (!doc.exists()) {
-                            // Only alert if we are not in secret room creation phase
-                            if (!app.state.secretRooms.includes(roomId)) {
-                                 // Might be deleted
-                            }
+                             // Only warn if not in creation phase
+                             if (!app.state.secretRooms.includes(roomId)) {
+                                 // Deleted logic handled by snapshot usually, or user action
+                             }
                             return;
                         }
                         const data = doc.data();
